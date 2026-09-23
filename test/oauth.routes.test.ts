@@ -6,6 +6,7 @@ import { createSession } from '../src/services/session.service';
 import { execute } from '../src/db/client';
 import { generateCodeChallenge } from '../src/crypto/pkce';
 import { decodeJwt } from '../src/crypto/jwt';
+import { generateCsrfToken } from '../src/crypto/csrf';
 import type { Bindings } from '../src/types/env';
 
 describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
@@ -145,6 +146,8 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
       const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
       const challenge = await generateCodeChallenge(verifier);
 
+      const csrfToken = await generateCsrfToken(sessionId);
+
       // Step 1: POST /oauth/consent (allow)
       const consentBody = new URLSearchParams({
         decision: 'allow',
@@ -155,6 +158,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
         code_challenge_method: 'S256',
         state: 'state_random_789',
         nonce: 'nonce_custom_999',
+        _csrf: csrfToken,
       });
 
       const consentRes = await app.request(
@@ -275,6 +279,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
     });
 
     it('handles user denial in /oauth/consent', async () => {
+      const csrfToken = await generateCsrfToken(sessionId);
       const consentBody = new URLSearchParams({
         decision: 'deny',
         client_id: clientId,
@@ -282,6 +287,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
         scope: 'openid',
         code_challenge: 'chal',
         state: 'denied_state',
+        _csrf: csrfToken,
       });
 
       const res = await app.request(

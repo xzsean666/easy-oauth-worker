@@ -19,11 +19,20 @@ import { RegisterView } from '../views/auth/register';
 import { ForgotPasswordView } from '../views/auth/forgot-password';
 import { ResetPasswordView } from '../views/auth/reset-password';
 import { VerifyEmailView } from '../views/auth/verify-email';
+import { rateLimiter } from '../middlewares/rate-limit';
 
 export const SESSION_COOKIE_NAME = 'easy_session';
 export const SESSION_COOKIE_MAX_AGE = 7 * 24 * 3600;
 
 export const authRoutes = new Hono<AppContext>();
+
+// Lightweight in-memory rate limiter for authentication endpoints
+const authLimiter = rateLimiter({
+  maxRequests: 50,
+  windowSeconds: 60,
+  prefix: 'auth',
+  errorMessage: 'Too many attempts. Please try again in a few moments.',
+});
 
 // Helper to determine secure flag
 function isSecure(url: string): boolean {
@@ -85,7 +94,7 @@ authRoutes.get('/login', async (c) => {
 });
 
 // POST /login
-authRoutes.post('/login', async (c) => {
+authRoutes.post('/login', authLimiter, async (c) => {
   const body = await c.req.parseBody();
   const email = (body.email as string) || '';
   const password = (body.password as string) || '';
@@ -141,7 +150,7 @@ authRoutes.get('/register', async (c) => {
 });
 
 // POST /register
-authRoutes.post('/register', async (c) => {
+authRoutes.post('/register', authLimiter, async (c) => {
   const body = await c.req.parseBody();
   const email = (body.email as string) || '';
   const password = (body.password as string) || '';
@@ -243,7 +252,7 @@ authRoutes.get('/forgot-password', (c) => {
 });
 
 // POST /forgot-password
-authRoutes.post('/forgot-password', async (c) => {
+authRoutes.post('/forgot-password', authLimiter, async (c) => {
   const body = await c.req.parseBody();
   const email = (body.email as string) || '';
 

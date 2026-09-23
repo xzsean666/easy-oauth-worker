@@ -1,57 +1,47 @@
 # Session State
 
 - **当前 Goal**: 构建轻量级自托管 OAuth 2.0 / OpenID Connect Provider (`easy-oauth-worker`)
-- **当前 Task**: TASK-016 (跨域支持、安全响应头与定时数据清理)
-- **当前状态**: ALL AUDIT TASKS COMPLETED (DONE)
+- **当前 Task**: TASK-017 (全方位安全性、生产就绪度与性能加固优化)
+- **当前状态**: ALL AUDIT & HARDENING TASKS COMPLETED (DONE)
 - **已完成内容**:
-  - **TASK-013 (OIDC 协议符合性与基础认证安全修复)**:
-    - 为 `oauth_authorization_codes` 表新增 `nonce TEXT` 字段，并在授权码创建、提取、换取 Token 全流程传递，回填至 ID Token 的 claims 中。
-    - 修正 ID Token 的 `auth_time` Claim 为当前有效认证时间戳。
-    - 在 `/oauth/token` 响应头中强制添加 RFC 6749 规范的 `Cache-Control: no-store` 与 `Pragma: no-cache`。
-    - 引入 `sanitizeReturnTo` 防护，杜绝 `/login` 与 `/register` 的开放重定向漏洞（Open Redirect）。
-  - **TASK-014 (OAuth 2.0 权限边界与凭据生命周期加固)**:
-    - 引入客户端 `allowed_scopes` 白名单校验，阻止未经授权的 scope 请求。
-    - 在 `refreshAccessToken` 中增加 Scope 提权校验，禁止客户端索取超出原授权的新 scope，允许 narrowing。
-    - 实现 Refresh Token 30 天滑动/固定过期校验（`REFRESH_TOKEN_DURATION_SECONDS`）。
-    - 实现 `revokeAllUserTokens`，在密码修改和重置成功后级联撤销该用户所有的活跃 Session 与 OAuth Token。
-    - 兼容 RFC 6749 2.3.1 客户端凭据中的 `decodeURIComponent` 处理。
-  - **TASK-015 (邮件服务全链路业务闭环与开发模式增强)**:
-    - 为 SMTP Socket 通信 reader 添加 10 秒超时防护（`withTimeout`），防止 Cloudflare Worker 挂死。
-    - 在用户注册（`POST /register`）和忘记密码（`POST /forgot-password`）路由中打通 `sendEmail` 模板发送，若未配置 SMTP 则优雅降级打 log，不阻断开发流程。
-  - **TASK-016 (跨域支持、安全响应头与定时数据清理)**:
-    - 挂载 Hono `cors()` 中间件，向 `/.well-known/*`、`/oauth/token`、`/oauth/userinfo`、`/oauth/revoke` 开放跨域请求并支持 OPTIONS 预检。
-    - 注入全局安全响应头（`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: strict-origin-when-cross-origin`）。
-    - 在 `src/index.ts` 中实现 `cleanupExpiredData(db)` 并注册 Cloudflare Workers `scheduled` 定时任务，在 `wrangler.toml` 配置每日运行触发器。
-    - 添加全局异常捕获 `app.onError` 与 `app.notFound` 处理。
-  - **自动化测试覆盖**:
-    - 新增并扩展 12 个测试套件，涵盖 108 个自动化测试，全部一次性绿灯通过。
+  - **TASK-017 (全方位安全性、生产就绪度与性能加固优化)**:
+    - **Session-Bound CSRF 防护**: 基于原生 Web Crypto HMAC-SHA256 实现零数据库开销的 CSRF 防护（`src/crypto/csrf.ts`），覆盖 `/oauth/consent` 与管理后台所有状态变更表单（`/admin/clients`、`/admin/users/:id/action`、`/admin/clients/:id/rotate`、`/admin/clients/:id/delete`）。
+    - **敏感凭据脱敏**: 消除新建 Client 与轮换 Secret 时重定向 URL 中的 `new_secret`，采用安全且短期的 Flash Cookie（`admin_flash_secret`）一次性安全展示后立即自动销毁。
+    - **Token 定时清理逻辑修复**: 修正 `cleanupExpiredData`，不仅清理被撤销的 Token，而且彻底清理自然过期的 access_token 以及超出 30 天生命周期的 refresh_token，彻底解决数据库膨胀隐患。
+    - **DoS 与密码防护**: 限制密码长度上限为 128 字符，杜绝超长字符串引发 PBKDF2 100,000 轮哈希导致的 CPU 耗尽 DoS 攻击。
+    - **轻量内存频控 (Rate Limiting)**: 在 `src/middlewares/rate-limit.ts` 实现 O(1) 零数据库开销的滑动窗口频控，挂载于 `/login`、`/register` 与 `/forgot-password`。
+    - **管理员防自锁死**: 在 `updateUserStatus` 中禁止当前管理员取消自身的管理员权限或禁用自身账号。
+    - **SMTP 命令注入防御**: 在 `sendSmtpEmail` 建立 socket 前校验 `from` 与 `to` 地址中的 CRLF 换行字符。
+    - **OIDC 生产私钥保障**: 在 `getSigningKey` 中若未配置 `OIDC_SIGNING_KEY` 环境变量则输出高优先级生产警告，并提供一键生成生产 RSA-2048 JWK 的脚本 `scripts/generate-keys.ts`。
+  - **自动化测试全覆盖**:
+    - 新增 `test/security.test.ts`，涵盖 CSRF 拦截/防伪造、密码长度限制、管理员自保护、SMTP CRLF 防护、Token 垃圾回收和内存频控测试。
+    - 现有 12 个测试套件 + 新增 1 个安全套件，共计 13 个套件、120 个自动化测试全部一次性绿灯通过。
 - **修改过的文件**:
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
-  - `migrations/0001_initial_schema.sql`
-  - `src/db/schema.ts`
   - `src/index.ts`
+  - `src/routes/admin-api.ts`
+  - `src/routes/admin-web.tsx`
   - `src/routes/auth.ts`
   - `src/routes/oauth.ts`
-  - `src/routes/oidc.ts`
+  - `src/services/admin.service.ts`
   - `src/services/auth.service.ts`
   - `src/services/email.service.ts`
-  - `src/services/oauth.service.ts`
   - `src/services/oidc.service.ts`
-  - `test/auth.routes.test.ts`
-  - `test/auth.service.test.ts`
-  - `test/health.test.ts`
+  - `src/views/admin/clients.tsx`
+  - `src/views/admin/users.tsx`
+  - `src/views/oauth/consent.tsx`
+  - `test/admin.web.test.ts`
+  - `test/e2e.test.ts`
   - `test/oauth.routes.test.ts`
-  - `test/oauth.service.test.ts`
-  - `test/oidc.service.test.ts`
-  - `wrangler.toml`
 - **创建过的文件**:
-  - `docs/AI/tasks/TASK-013.md`
-  - `docs/AI/tasks/TASK-014.md`
-  - `docs/AI/tasks/TASK-015.md`
-  - `docs/AI/tasks/TASK-016.md`
+  - `docs/AI/tasks/TASK-017.md`
+  - `scripts/generate-keys.ts`
+  - `src/crypto/csrf.ts`
+  - `src/middlewares/rate-limit.ts`
+  - `test/security.test.ts`
 - **已运行的验证命令及结果**:
   - `pnpm run typecheck` (退出码 0，TypeScript 检查 0 错误)
-  - `pnpm run test` (退出码 0，12 个测试套件，108 个测试用例全量通过)
+  - `pnpm run test` (退出码 0，13 个测试套件，120 个测试用例全量通过)
 - **未解决问题**: 无
-- **后续任务**: 系统所有审计发现的安全与性能隐患已全部治理，所有 16 个 Tasks 均已标记为 DONE，工程处于生产就绪状态。
+- **后续任务**: 系统所有审计发现的安全与性能隐患已全面治理完毕，17 个 Tasks 均已全部标记为 DONE，系统处于极佳的高性能、高安全生产就绪状态。

@@ -8,6 +8,7 @@ interface ClientsViewProps {
   newSecretInfo?: { clientId: string; secret: string };
   message?: string;
   error?: string;
+  csrfToken?: string;
 }
 
 export const ClientsView = ({
@@ -17,6 +18,7 @@ export const ClientsView = ({
   newSecretInfo,
   message,
   error,
+  csrfToken,
 }: ClientsViewProps) => {
   return (
     <AdminLayout title="OAuth 2.0 Clients" currentPath="/admin/clients" adminEmail={adminEmail} siteName={siteName}>
@@ -59,6 +61,7 @@ export const ClientsView = ({
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
         <h2 class="text-base font-semibold text-white">Register New OAuth Client</h2>
         <form method="post" action="/admin/clients" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
           <div class="space-y-1">
             <label class="block text-xs font-medium text-slate-300" for="name">
               Application Name
@@ -172,6 +175,7 @@ export const ClientsView = ({
                 <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800/80">
                   {/* Rotate Secret */}
                   <form method="post" action={`/admin/clients/${client.client_id}/rotate`} class="inline-block">
+                    {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
                     <button
                       type="submit"
                       class="text-xs text-amber-400 hover:text-amber-300 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors"
@@ -182,6 +186,7 @@ export const ClientsView = ({
 
                   {/* Delete Client */}
                   <form method="post" action={`/admin/clients/${client.client_id}/delete`} class="inline-block">
+                    {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
                     <button
                       type="submit"
                       class="text-xs text-rose-400 hover:text-rose-300 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg transition-colors"

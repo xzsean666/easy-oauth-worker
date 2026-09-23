@@ -12,6 +12,7 @@ import {
   revokeToken,
 } from '../services/oauth.service';
 import { generateIdToken } from '../services/oidc.service';
+import { generateCsrfToken, verifyCsrfToken } from '../crypto/csrf';
 import { ConsentView } from '../views/oauth/consent';
 
 export const oauthRoutes = new Hono<AppContext>();
@@ -109,6 +110,7 @@ oauthRoutes.get('/oauth/authorize', async (c) => {
   }
 
   const requestedScopes = scope.trim().split(/\s+/);
+  const csrfToken = await generateCsrfToken(sessionData.session.id, c.env.SESSION_SECRET);
 
   return c.html(
     ConsentView({
@@ -123,6 +125,7 @@ oauthRoutes.get('/oauth/authorize', async (c) => {
       codeChallengeMethod,
       state,
       nonce,
+      csrfToken,
     })
   );
 });
@@ -138,6 +141,7 @@ oauthRoutes.post('/oauth/consent', async (c) => {
   const codeChallengeMethod = (body.code_challenge_method as string) || 'S256';
   const state = (body.state as string) || undefined;
   const nonce = (body.nonce as string) || undefined;
+  const submittedCsrf = (body._csrf as string) || '';
 
   // Validate session
   const sessionId = getCookie(c, SESSION_COOKIE_NAME);
@@ -148,6 +152,12 @@ oauthRoutes.post('/oauth/consent', async (c) => {
   const sessionData = await validateSession(c.env.DB, sessionId);
   if (!sessionData) {
     return c.redirect('/login');
+  }
+
+  // Validate CSRF token
+  const isCsrfValid = await verifyCsrfToken(submittedCsrf, sessionId, c.env.SESSION_SECRET);
+  if (!isCsrfValid) {
+    return c.text('Invalid or missing CSRF token', 403);
   }
 
   // Validate client & redirectUri & scope

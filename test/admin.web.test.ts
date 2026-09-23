@@ -4,6 +4,7 @@ import { createTestDatabase, MockD1Database } from './helpers/mock-d1';
 import { registerUser } from '../src/services/auth.service';
 import { createSession } from '../src/services/session.service';
 import { execute, queryFirst } from '../src/db/client';
+import { generateCsrfToken } from '../src/crypto/csrf';
 import type { Bindings } from '../src/types/env';
 import type { User, OAuthClient } from '../src/db/schema';
 
@@ -97,6 +98,7 @@ describe('Admin Web UI Integration Tests', () => {
       expect(html).toContain('normaluser@example.com');
 
       // POST /admin/users/:id/action (toggle_active)
+      const csrfToken = await generateCsrfToken(adminSessionId);
       const postRes = await app.request(
         `/admin/users/${regularUserId}/action`,
         {
@@ -105,7 +107,7 @@ describe('Admin Web UI Integration Tests', () => {
             'Content-Type': 'application/x-www-form-urlencoded',
             Cookie: `easy_session=${adminSessionId}`,
           },
-          body: 'action=toggle_active',
+          body: `action=toggle_active&_csrf=${csrfToken}`,
         },
         mockEnv
       );
@@ -119,6 +121,7 @@ describe('Admin Web UI Integration Tests', () => {
     });
 
     it('manually verifies email via form POST', async () => {
+      const csrfToken = await generateCsrfToken(adminSessionId);
       const postRes = await app.request(
         `/admin/users/${regularUserId}/action`,
         {
@@ -127,7 +130,7 @@ describe('Admin Web UI Integration Tests', () => {
             'Content-Type': 'application/x-www-form-urlencoded',
             Cookie: `easy_session=${adminSessionId}`,
           },
-          body: 'action=verify_email',
+          body: `action=verify_email&_csrf=${csrfToken}`,
         },
         mockEnv
       );
@@ -139,12 +142,14 @@ describe('Admin Web UI Integration Tests', () => {
   });
 
   describe('OAuth Clients UI', () => {
-    it('renders clients view and creates new client via form POST', async () => {
+    it('renders clients view and creates new client via form POST using secure Flash Cookie', async () => {
+      const csrfToken = await generateCsrfToken(adminSessionId);
       // POST /admin/clients
       const formData = new URLSearchParams({
         name: 'Dashboard Registered Client',
         redirect_uris: 'https://client.example.com/cb\nhttps://client.example.com/alt',
         allowed_scopes: 'openid email profile',
+        _csrf: csrfToken,
       });
 
       const postRes = await app.request(
@@ -162,13 +167,21 @@ describe('Admin Web UI Integration Tests', () => {
 
       expect(postRes.status).toBe(302);
       const location = postRes.headers.get('Location')!;
-      expect(location).toContain('new_secret=');
+      // URL MUST NOT leak secret
+      expect(location).toBe('/admin/clients');
+      expect(location).not.toContain('new_secret=');
 
-      // Follow redirect to GET /admin/clients
+      // Secret is passed via secure Flash Cookie
+      const setCookieHeader = postRes.headers.get('Set-Cookie')!;
+      expect(setCookieHeader).toContain('admin_flash_secret=');
+
+      const flashCookie = setCookieHeader.split(';')[0];
+
+      // Follow redirect to GET /admin/clients with flash cookie
       const getRes = await app.request(
-        location,
+        '/admin/clients',
         {
-          headers: { Cookie: `easy_session=${adminSessionId}` },
+          headers: { Cookie: `easy_session=${adminSessionId}; ${flashCookie}` },
         },
         mockEnv
       );
@@ -178,7 +191,7 @@ describe('Admin Web UI Integration Tests', () => {
       expect(html).toContain('Dashboard Registered Client');
     });
 
-    it('rotates client secret via form POST', async () => {
+    it('rotates client secret via form POST using secure Flash Cookie', async () => {
       // Seed client
       await execute(
         db,
@@ -193,17 +206,23 @@ describe('Admin Web UI Integration Tests', () => {
         Math.floor(Date.now() / 1000)
       );
 
+      const csrfToken = await generateCsrfToken(adminSessionId);
       const rotateRes = await app.request(
         '/admin/clients/client_to_rotate/rotate',
         {
           method: 'POST',
-          headers: { Cookie: `easy_session=${adminSessionId}` },
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Cookie: `easy_session=${adminSessionId}`,
+          },
+          body: `_csrf=${csrfToken}`,
         },
         mockEnv
       );
 
       expect(rotateRes.status).toBe(302);
-      expect(rotateRes.headers.get('Location')).toContain('new_secret=');
+      expect(rotateRes.headers.get('Location')).toBe('/admin/clients');
+      expect(rotateRes.headers.get('Set-Cookie')).toContain('admin_flash_secret=');
 
       const updated = await queryFirst<OAuthClient>(db, 'SELECT client_secret FROM oauth_clients WHERE client_id = ?', 'client_to_rotate');
       expect(updated?.client_secret).not.toBe('old_secret_value');

@@ -93,6 +93,11 @@ export async function getSigningKey(env: Bindings): Promise<SigningKeyInfo> {
   }
 
   // Generate an in-memory key pair if none configured
+  console.warn(
+    '[oidc.service] WARNING: env.OIDC_SIGNING_KEY is not configured! ' +
+    'Generating ephemeral in-memory RSA key. Multi-isolate verification and restarts ' +
+    'will invalidate issued ID Tokens. Configure OIDC_SIGNING_KEY for production.'
+  );
   const keyPair = await generateRsaKeyPair();
   const kid = 'easy-oauth-default-key';
   const publicJwk = await exportJwk(keyPair.publicKey, kid);

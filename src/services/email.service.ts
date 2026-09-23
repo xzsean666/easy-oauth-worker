@@ -129,6 +129,11 @@ export async function sendSmtpEmail(
   email: EmailOptions,
   connector?: SocketConnector
 ): Promise<{ success: boolean; messageId?: string }> {
+  const fromAddr = email.from || config.from;
+  if (/[\r\n]/.test(fromAddr) || /[\r\n]/.test(email.to)) {
+    throw new Error('Invalid email address: CRLF characters detected');
+  }
+
   let socketConnector = connector;
   if (!socketConnector) {
     const mod = await import('cloudflare:sockets');
@@ -205,7 +210,6 @@ export async function sendSmtpEmail(
     }
 
     // 5. MAIL FROM
-    const fromAddr = email.from || config.from;
     await writer.writeCommand(`MAIL FROM:<${fromAddr}>`);
     const mailFromRes = await reader.readResponse();
     if (mailFromRes.code !== 250) {

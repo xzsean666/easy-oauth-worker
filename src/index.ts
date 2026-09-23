@@ -98,9 +98,19 @@ export async function cleanupExpiredData(db: D1Database): Promise<{
     .prepare('DELETE FROM verification_tokens WHERE expires_at < ? OR used = 1')
     .bind(now)
     .run();
+  // Purge tokens that are:
+  // 1. Explicitly revoked
+  // 2. Expired access tokens without a refresh token
+  // 3. Tokens where refresh token exceeded maximum 30-day lifetime
+  const MAX_REFRESH_LIFETIME = 30 * 24 * 3600;
   const resTokens = await db
-    .prepare('DELETE FROM oauth_tokens WHERE revoked = 1 AND expires_at < ?')
-    .bind(now)
+    .prepare(
+      `DELETE FROM oauth_tokens 
+       WHERE revoked = 1 
+          OR (refresh_token IS NULL AND expires_at < ?) 
+          OR (created_at + ? < ?)`
+    )
+    .bind(now, MAX_REFRESH_LIFETIME, now)
     .run();
 
   return {

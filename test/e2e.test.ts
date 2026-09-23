@@ -141,6 +141,11 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
     expect(consentHtml).toContain(userEmail);
     expect(consentHtml).toContain('OpenID Connect');
 
+    // Extract CSRF token from consent form
+    const csrfMatch = consentHtml.match(/name="_csrf" value="([^"]+)"/);
+    const csrfToken = csrfMatch ? csrfMatch[1] : '';
+    expect(csrfToken).toBeTruthy();
+
     // User submits consent (allow)
     const consentPostData = new URLSearchParams({
       decision: 'allow',
@@ -151,6 +156,7 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
       code_challenge_method: 'S256',
       state: clientState,
       nonce: clientNonce,
+      _csrf: csrfToken,
     });
 
     const consentSubmitRes = await app.request(

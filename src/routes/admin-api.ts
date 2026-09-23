@@ -43,8 +43,10 @@ adminApiRoutes.patch('/api/admin/users/:id', async (c) => {
     is_admin?: number;
   };
 
+  const currentAdmin = c.get('user');
+
   try {
-    const updated = await updateUserStatus(c.env.DB, id, body);
+    const updated = await updateUserStatus(c.env.DB, id, body, currentAdmin?.id);
     return c.json(updated);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to update user';

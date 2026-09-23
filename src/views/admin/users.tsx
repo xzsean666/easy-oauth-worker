@@ -8,6 +8,7 @@ interface UsersViewProps {
   adminEmail?: string;
   siteName?: string;
   message?: string;
+  csrfToken?: string;
 }
 
 export const UsersView = ({
@@ -17,6 +18,7 @@ export const UsersView = ({
   adminEmail,
   siteName,
   message,
+  csrfToken,
 }: UsersViewProps) => {
   return (
     <AdminLayout title="Users Management" currentPath="/admin/users" adminEmail={adminEmail} siteName={siteName}>
@@ -100,6 +102,7 @@ export const UsersView = ({
                   <td class="px-6 py-4 text-right space-x-2">
                     {/* Toggle Active */}
                     <form method="post" action={`/admin/users/${user.id}/action`} class="inline-block">
+                      {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
                       <input type="hidden" name="action" value="toggle_active" />
                       <button
                         type="submit"
@@ -112,6 +115,7 @@ export const UsersView = ({
                     {/* Manual Verify */}
                     {user.email_verified === 0 && (
                       <form method="post" action={`/admin/users/${user.id}/action`} class="inline-block">
+                        {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
                         <input type="hidden" name="action" value="verify_email" />
                         <button
                           type="submit"
@@ -124,6 +128,7 @@ export const UsersView = ({
 
                     {/* Revoke Sessions */}
                     <form method="post" action={`/admin/users/${user.id}/action`} class="inline-block">
+                      {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
                       <input type="hidden" name="action" value="revoke_sessions" />
                       <button
                         type="submit"

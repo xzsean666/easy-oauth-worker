@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
-import { getCookie } from 'hono/cookie';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext } from '../types/env';
 import { SESSION_COOKIE_NAME } from './auth';
 import { validateSession, revokeAllUserSessions } from '../services/session.service';
+import { generateCsrfToken, verifyCsrfToken } from '../crypto/csrf';
 import {
   getDashboardStats,
   listUsers,
@@ -69,6 +70,10 @@ async function handleAdminWebAuth(c: any, next: any) {
 
   c.set('user', sessionData.user);
   c.set('session', sessionData.session);
+
+  const csrfToken = await generateCsrfToken(sessionData.session.id, c.env.SESSION_SECRET);
+  c.set('csrfToken', csrfToken as any);
+
   await next();
 }
 
@@ -91,6 +96,7 @@ adminWebRoutes.get('/admin/users', async (c) => {
   const admin = c.get('user');
   const search = c.req.query('search') || undefined;
   const message = c.req.query('message') || undefined;
+  const csrfToken = (c.get as any)('csrfToken');
 
   const result = await listUsers(c.env.DB, { search });
 
@@ -102,6 +108,7 @@ adminWebRoutes.get('/admin/users', async (c) => {
       adminEmail: admin?.email,
       siteName: c.env.SITE_NAME,
       message,
+      csrfToken,
     })
   );
 });
@@ -110,32 +117,57 @@ adminWebRoutes.get('/admin/users', async (c) => {
 adminWebRoutes.post('/admin/users/:id/action', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.parseBody();
-  const action = (body.action as string) || '';
-
-  if (action === 'toggle_active') {
-    const userRow = await c.env.DB.prepare('SELECT is_active FROM users WHERE id = ?')
-      .bind(id)
-      .first<{ is_active: number }>();
-    if (userRow) {
-      const nextActive = userRow.is_active === 1 ? 0 : 1;
-      await updateUserStatus(c.env.DB, id, { is_active: nextActive });
-    }
-  } else if (action === 'verify_email') {
-    await updateUserStatus(c.env.DB, id, { email_verified: 1 });
-  } else if (action === 'revoke_sessions') {
-    await revokeAllUserSessions(c.env.DB, id);
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  const isCsrfValid = await verifyCsrfToken(body._csrf as string, sessionId, c.env.SESSION_SECRET);
+  if (!isCsrfValid) {
+    return c.text('Invalid or missing CSRF token', 403);
   }
 
-  return c.redirect('/admin/users?message=User+action+completed');
+  const currentAdmin = c.get('user');
+  const action = (body.action as string) || '';
+
+  try {
+    if (action === 'toggle_active') {
+      const userRow = await c.env.DB.prepare('SELECT is_active FROM users WHERE id = ?')
+        .bind(id)
+        .first<{ is_active: number }>();
+      if (userRow) {
+        const nextActive = userRow.is_active === 1 ? 0 : 1;
+        await updateUserStatus(c.env.DB, id, { is_active: nextActive }, currentAdmin?.id);
+      }
+    } else if (action === 'verify_email') {
+      await updateUserStatus(c.env.DB, id, { email_verified: 1 }, currentAdmin?.id);
+    } else if (action === 'revoke_sessions') {
+      await revokeAllUserSessions(c.env.DB, id);
+    }
+    return c.redirect('/admin/users?message=User+action+completed');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'User action failed';
+    return c.redirect(`/admin/users?message=${encodeURIComponent(msg)}`);
+  }
 });
 
 // GET /admin/clients
 adminWebRoutes.get('/admin/clients', async (c) => {
   const admin = c.get('user');
-  const newSecret = c.req.query('new_secret');
-  const newClientId = c.req.query('client_id');
   const message = c.req.query('message');
   const error = c.req.query('error');
+  const csrfToken = (c.get as any)('csrfToken');
+
+  // Flash cookie retrieval
+  let flashSecretInfo: { clientId: string; secret: string } | undefined;
+  const flashCookie = getCookie(c, 'admin_flash_secret');
+  if (flashCookie) {
+    try {
+      flashSecretInfo = JSON.parse(flashCookie);
+    } catch {}
+    deleteCookie(c, 'admin_flash_secret', { path: '/admin' });
+  }
+
+  // Fallback to query param if not in cookie
+  const newSecret = c.req.query('new_secret');
+  const newClientId = c.req.query('client_id');
+  const finalSecretInfo = flashSecretInfo || (newSecret && newClientId ? { clientId: newClientId, secret: newSecret } : undefined);
 
   const clients = await listClients(c.env.DB);
 
@@ -144,9 +176,10 @@ adminWebRoutes.get('/admin/clients', async (c) => {
       clients,
       adminEmail: admin?.email,
       siteName: c.env.SITE_NAME,
-      newSecretInfo: newSecret && newClientId ? { clientId: newClientId, secret: newSecret } : undefined,
+      newSecretInfo: finalSecretInfo,
       message,
       error,
+      csrfToken,
     })
   );
 });
@@ -154,6 +187,12 @@ adminWebRoutes.get('/admin/clients', async (c) => {
 // POST /admin/clients
 adminWebRoutes.post('/admin/clients', async (c) => {
   const body = await c.req.parseBody();
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  const isCsrfValid = await verifyCsrfToken(body._csrf as string, sessionId, c.env.SESSION_SECRET);
+  if (!isCsrfValid) {
+    return c.text('Invalid or missing CSRF token', 403);
+  }
+
   const name = (body.name as string) || '';
   const redirectUrisRaw = (body.redirect_uris as string) || '';
   const allowedScopesRaw = (body.allowed_scopes as string) || '';
@@ -177,9 +216,21 @@ adminWebRoutes.post('/admin/clients', async (c) => {
       isPublic,
     });
 
-    return c.redirect(
-      `/admin/clients?client_id=${result.client.client_id}&new_secret=${result.plainSecret}`
+    // Store secret in secure, short-lived flash cookie
+    setCookie(
+      c,
+      'admin_flash_secret',
+      JSON.stringify({ clientId: result.client.client_id, secret: result.plainSecret }),
+      {
+        httpOnly: true,
+        secure: c.req.url.startsWith('https://'),
+        path: '/admin',
+        sameSite: 'Lax',
+        maxAge: 60,
+      }
     );
+
+    return c.redirect('/admin/clients');
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to create client';
     return c.redirect(`/admin/clients?error=${encodeURIComponent(msg)}`);
@@ -189,11 +240,31 @@ adminWebRoutes.post('/admin/clients', async (c) => {
 // POST /admin/clients/:id/rotate
 adminWebRoutes.post('/admin/clients/:id/rotate', async (c) => {
   const id = c.req.param('id');
+  const body = await c.req.parseBody();
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  const isCsrfValid = await verifyCsrfToken(body._csrf as string, sessionId, c.env.SESSION_SECRET);
+  if (!isCsrfValid) {
+    return c.text('Invalid or missing CSRF token', 403);
+  }
+
   try {
     const result = await rotateClientSecret(c.env.DB, id);
-    return c.redirect(
-      `/admin/clients?client_id=${id}&new_secret=${result.newSecret}`
+
+    // Store rotated secret in flash cookie
+    setCookie(
+      c,
+      'admin_flash_secret',
+      JSON.stringify({ clientId: id, secret: result.newSecret }),
+      {
+        httpOnly: true,
+        secure: c.req.url.startsWith('https://'),
+        path: '/admin',
+        sameSite: 'Lax',
+        maxAge: 60,
+      }
     );
+
+    return c.redirect('/admin/clients');
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to rotate client secret';
     return c.redirect(`/admin/clients?error=${encodeURIComponent(msg)}`);
@@ -203,6 +274,13 @@ adminWebRoutes.post('/admin/clients/:id/rotate', async (c) => {
 // POST /admin/clients/:id/delete
 adminWebRoutes.post('/admin/clients/:id/delete', async (c) => {
   const id = c.req.param('id');
+  const body = await c.req.parseBody();
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  const isCsrfValid = await verifyCsrfToken(body._csrf as string, sessionId, c.env.SESSION_SECRET);
+  if (!isCsrfValid) {
+    return c.text('Invalid or missing CSRF token', 403);
+  }
+
   try {
     await deleteClient(c.env.DB, id);
     return c.redirect('/admin/clients?message=Client+deleted');

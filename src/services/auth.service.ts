@@ -5,7 +5,8 @@ import { generateId, generateRandomToken } from '../crypto/token';
 import { createSession, revokeAllUserSessions } from './session.service';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 8;
+export const MAX_PASSWORD_LENGTH = 128;
 const VERIFY_EMAIL_DURATION_SECONDS = 24 * 3600; // 24 hours
 const RESET_PASSWORD_DURATION_SECONDS = 3600; // 1 hour
 
@@ -30,6 +31,9 @@ export async function registerUser(
 
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password cannot exceed ${MAX_PASSWORD_LENGTH} characters`);
   }
 
   const existing = await queryFirst<User>(
@@ -237,6 +241,9 @@ export async function resetPasswordWithToken(
   if (newPassword.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
   }
+  if (newPassword.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password cannot exceed ${MAX_PASSWORD_LENGTH} characters`);
+  }
 
   const now = Math.floor(Date.now() / 1000);
 
@@ -304,6 +311,9 @@ export async function changePassword(
 ): Promise<User> {
   if (newPassword.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+  }
+  if (newPassword.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password cannot exceed ${MAX_PASSWORD_LENGTH} characters`);
   }
 
   const user = await queryFirst<User>(

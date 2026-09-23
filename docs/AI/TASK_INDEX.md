@@ -18,3 +18,4 @@
 | [TASK-014](tasks/TASK-014.md) | OAuth 2.0 权限边界与凭据生命周期加固 | DONE | TASK-013 | allowed_scopes 校验、Refresh Token 范围提权防护、30天过期校验与级联吊销 |
 | [TASK-015](tasks/TASK-015.md) | 邮件服务全链路业务闭环与开发模式增强 | DONE | TASK-014 | 注册与密码重置真实发信闭环、优雅降级与 SMTP 超时保护 |
 | [TASK-016](tasks/TASK-016.md) | 跨域支持、安全响应头与定时数据清理 | DONE | TASK-015 | CORS 中间件、Clickjacking 防御、Cron 数据清理与全局错误捕获 |
+| [TASK-017](tasks/TASK-017.md) | 全方位安全性、生产就绪度与性能加固优化 | DONE | TASK-016 | CSRF防护、Token清理修复、URL凭据脱敏、频控与防自锁死 |

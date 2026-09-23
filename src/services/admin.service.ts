@@ -89,11 +89,21 @@ export async function listUsers(
 export async function updateUserStatus(
   db: D1Database,
   userId: string,
-  updates: { is_active?: number; email_verified?: number; is_admin?: number }
+  updates: { is_active?: number; email_verified?: number; is_admin?: number },
+  currentAdminId?: string
 ): Promise<SafeUser> {
   const user = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', userId);
   if (!user) {
     throw new Error('User not found');
+  }
+
+  if (currentAdminId && userId === currentAdminId) {
+    if (updates.is_admin !== undefined && updates.is_admin === 0) {
+      throw new Error('You cannot remove administrator privileges from your own account');
+    }
+    if (updates.is_active !== undefined && updates.is_active === 0) {
+      throw new Error('You cannot disable your own account');
+    }
   }
 
   const newIsActive = updates.is_active !== undefined ? updates.is_active : user.is_active;

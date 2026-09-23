@@ -12,6 +12,7 @@ interface ConsentViewProps {
   codeChallengeMethod: string;
   state?: string;
   nonce?: string;
+  csrfToken?: string;
 }
 
 const SCOPE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
@@ -41,6 +42,7 @@ export const ConsentView = ({
   codeChallengeMethod,
   state,
   nonce,
+  csrfToken,
 }: ConsentViewProps) => {
   return (
     <Layout title={`Authorize ${clientName}`} siteName={siteName}>
@@ -82,6 +84,7 @@ export const ConsentView = ({
         <input type="hidden" name="code_challenge_method" value={codeChallengeMethod} />
         {state && <input type="hidden" name="state" value={state} />}
         {nonce && <input type="hidden" name="nonce" value={nonce} />}
+        {csrfToken && <input type="hidden" name="_csrf" value={csrfToken} />}
 
         <div class="flex space-x-3 pt-2">
           <button
