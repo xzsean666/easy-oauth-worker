@@ -15,6 +15,7 @@ export interface TokenResponse {
   refresh_token?: string;
   scope: string;
   user_id: string;
+  nonce?: string | null;
 }
 
 /**
@@ -62,6 +63,25 @@ export async function validateClient(
 }
 
 /**
+ * Validates that requested scopes are permitted for this OAuth client.
+ */
+export function validateClientScope(client: OAuthClient, requestedScope: string): void {
+  let allowed: string[] = [];
+  try {
+    allowed = JSON.parse(client.allowed_scopes);
+  } catch {
+    allowed = [];
+  }
+
+  const requested = requestedScope.trim().split(/\s+/).filter(Boolean);
+  for (const s of requested) {
+    if (!allowed.includes(s)) {
+      throw new Error(`Scope '${s}' is not allowed for this client`);
+    }
+  }
+}
+
+/**
  * Creates an authorization code bound to user, client, redirect_uri and PKCE challenge.
  */
 export async function createAuthorizationCode(
@@ -73,6 +93,7 @@ export async function createAuthorizationCode(
     scope: string;
     codeChallenge: string;
     codeChallengeMethod?: string;
+    nonce?: string;
     durationSeconds?: number;
   }
 ): Promise<{ code: string; expiresAt: number }> {
@@ -94,8 +115,8 @@ export async function createAuthorizationCode(
     db,
     `INSERT INTO oauth_authorization_codes (
       code, client_id, user_id, redirect_uri, scope,
-      code_challenge, code_challenge_method, expires_at, used, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      code_challenge, code_challenge_method, nonce, expires_at, used, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
     code,
     params.clientId,
     params.userId,
@@ -103,6 +124,7 @@ export async function createAuthorizationCode(
     params.scope,
     params.codeChallenge,
     method,
+    params.nonce || null,
     expiresAt,
     now
   );
@@ -207,6 +229,7 @@ export async function exchangeAuthorizationCode(
     refresh_token: refreshToken,
     scope: codeRecord.scope,
     user_id: codeRecord.user_id,
+    nonce: codeRecord.nonce || undefined,
   };
 }
 
@@ -242,6 +265,24 @@ export async function refreshAccessToken(
     throw new Error('Refresh token has been revoked');
   }
 
+  // Check 30-day refresh token expiration
+  if (tokenRecord.created_at + REFRESH_TOKEN_DURATION_SECONDS <= now) {
+    throw new Error('Refresh token has expired');
+  }
+
+  // Validate scope: client can narrow scope or keep it, but never escalate/expand
+  let scope = tokenRecord.scope;
+  if (params.scope) {
+    const originalScopes = tokenRecord.scope.trim().split(/\s+/).filter(Boolean);
+    const requestedScopes = params.scope.trim().split(/\s+/).filter(Boolean);
+    for (const s of requestedScopes) {
+      if (!originalScopes.includes(s)) {
+        throw new Error(`Scope '${s}' exceeds originally granted scopes`);
+      }
+    }
+    scope = params.scope;
+  }
+
   // Revoke old token pair
   await execute(
     db,
@@ -254,7 +295,6 @@ export async function refreshAccessToken(
   const newAccessToken = generateRandomToken(32);
   const newRefreshToken = generateRandomToken(32);
   const expiresAt = now + ACCESS_TOKEN_DURATION_SECONDS;
-  const scope = params.scope || tokenRecord.scope;
 
   await execute(
     db,
@@ -279,6 +319,21 @@ export async function refreshAccessToken(
     scope,
     user_id: tokenRecord.user_id,
   };
+}
+
+/**
+ * Revokes all active OAuth tokens for a specific user.
+ */
+export async function revokeAllUserTokens(
+  db: D1Database,
+  userId: string
+): Promise<boolean> {
+  const res = await execute(
+    db,
+    'UPDATE oauth_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0',
+    userId
+  );
+  return (res.meta.changes ?? 0) > 0;
 }
 
 /**

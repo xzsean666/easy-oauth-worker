@@ -3,10 +3,12 @@ import { createTestDatabase, MockD1Database } from './helpers/mock-d1';
 import { execute } from '../src/db/client';
 import {
   validateClient,
+  validateClientScope,
   createAuthorizationCode,
   exchangeAuthorizationCode,
   refreshAccessToken,
   revokeToken,
+  revokeAllUserTokens,
   validateAccessToken,
 } from '../src/services/oauth.service';
 import { generateCodeChallenge } from '../src/crypto/pkce';
@@ -314,6 +316,128 @@ describe('OAuth 2.0 Service Tests', () => {
 
       const afterRevoke = await validateAccessToken(db, tokens.access_token);
       expect(afterRevoke?.isValid).toBe(false);
+    });
+
+    it('rejects scope escalation on refresh token and allows narrowing scope', async () => {
+      const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+      const challenge = await generateCodeChallenge(verifier);
+
+      const { code } = await createAuthorizationCode(db, {
+        clientId,
+        userId,
+        redirectUri,
+        scope: 'openid email',
+        codeChallenge: challenge,
+      });
+
+      const tokens = await exchangeAuthorizationCode(db, {
+        clientId,
+        clientSecret,
+        code,
+        redirectUri,
+        codeVerifier: verifier,
+      });
+
+      // Attempting to escalate scope should fail
+      await expect(
+        refreshAccessToken(db, {
+          clientId,
+          clientSecret,
+          refreshToken: tokens.refresh_token!,
+          scope: 'openid email admin:write',
+        })
+      ).rejects.toThrow("Scope 'admin:write' exceeds originally granted scopes");
+
+      // Narrowing scope should succeed
+      const narrowed = await refreshAccessToken(db, {
+        clientId,
+        clientSecret,
+        refreshToken: tokens.refresh_token!,
+        scope: 'openid',
+      });
+
+      expect(narrowed.scope).toBe('openid');
+    });
+
+    it('rejects refresh token after 30 days expiration', async () => {
+      const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+      const challenge = await generateCodeChallenge(verifier);
+
+      const { code } = await createAuthorizationCode(db, {
+        clientId,
+        userId,
+        redirectUri,
+        scope: 'openid',
+        codeChallenge: challenge,
+      });
+
+      const tokens = await exchangeAuthorizationCode(db, {
+        clientId,
+        clientSecret,
+        code,
+        redirectUri,
+        codeVerifier: verifier,
+      });
+
+      // Artificially age the token past 30 days
+      const thirtyOneDaysAgo = Math.floor(Date.now() / 1000) - (31 * 24 * 3600);
+      await execute(
+        db,
+        'UPDATE oauth_tokens SET created_at = ? WHERE refresh_token = ?',
+        thirtyOneDaysAgo,
+        tokens.refresh_token!
+      );
+
+      await expect(
+        refreshAccessToken(db, {
+          clientId,
+          clientSecret,
+          refreshToken: tokens.refresh_token!,
+        })
+      ).rejects.toThrow('Refresh token has expired');
+    });
+
+    it('revokes all user tokens via revokeAllUserTokens', async () => {
+      const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+      const challenge = await generateCodeChallenge(verifier);
+
+      const { code } = await createAuthorizationCode(db, {
+        clientId,
+        userId,
+        redirectUri,
+        scope: 'openid',
+        codeChallenge: challenge,
+      });
+
+      const tokens = await exchangeAuthorizationCode(db, {
+        clientId,
+        clientSecret,
+        code,
+        redirectUri,
+        codeVerifier: verifier,
+      });
+
+      const check1 = await validateAccessToken(db, tokens.access_token);
+      expect(check1?.isValid).toBe(true);
+
+      await revokeAllUserTokens(db, userId);
+
+      const check2 = await validateAccessToken(db, tokens.access_token);
+      expect(check2?.isValid).toBe(false);
+    });
+  });
+
+  describe('Client Scope Enforcement', () => {
+    it('validates allowed scopes and rejects unauthorized scopes', async () => {
+      const client = await validateClient(db, clientId);
+
+      expect(() => {
+        validateClientScope(client, 'openid email');
+      }).not.toThrow();
+
+      expect(() => {
+        validateClientScope(client, 'openid admin:super');
+      }).toThrow("Scope 'admin:super' is not allowed for this client");
     });
   });
 });

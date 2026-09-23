@@ -30,6 +30,21 @@ function stringToBase64(str: string): string {
   return btoa(binary);
 }
 
+export const DEFAULT_SMTP_TIMEOUT_MS = 10000;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs = DEFAULT_SMTP_TIMEOUT_MS,
+  errorMsg = 'SMTP socket timeout'
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    ),
+  ]);
+}
+
 export class SmtpBufferReader {
   private reader: ReadableStreamDefaultReader<Uint8Array>;
   private buffer: string = '';
@@ -47,7 +62,11 @@ export class SmtpBufferReader {
         this.buffer = this.buffer.substring(lineEnd + 2);
         return line;
       }
-      const { value, done } = await this.reader.read();
+      const { value, done } = await withTimeout(
+        this.reader.read(),
+        DEFAULT_SMTP_TIMEOUT_MS,
+        'SMTP connection read timed out'
+      );
       if (done) {
         if (this.buffer.length > 0) {
           const line = this.buffer;

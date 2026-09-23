@@ -5,6 +5,7 @@ import { SESSION_COOKIE_NAME } from './auth';
 import { validateSession } from '../services/session.service';
 import {
   validateClient,
+  validateClientScope,
   createAuthorizationCode,
   exchangeAuthorizationCode,
   refreshAccessToken,
@@ -26,10 +27,17 @@ function parseClientCredentials(c: any, body: Record<string, unknown>): {
       const decoded = atob(base64Credentials);
       const colonIdx = decoded.indexOf(':');
       if (colonIdx !== -1) {
-        return {
-          clientId: decoded.substring(0, colonIdx),
-          clientSecret: decoded.substring(colonIdx + 1),
-        };
+        const rawId = decoded.substring(0, colonIdx);
+        const rawSecret = decoded.substring(colonIdx + 1);
+        let clientId = rawId;
+        let clientSecret = rawSecret;
+        try {
+          clientId = decodeURIComponent(rawId);
+        } catch {}
+        try {
+          clientSecret = decodeURIComponent(rawSecret);
+        } catch {}
+        return { clientId, clientSecret };
       }
     } catch {}
   }
@@ -58,8 +66,14 @@ oauthRoutes.get('/oauth/authorize', async (c) => {
   let client;
   try {
     client = await validateClient(c.env.DB, clientId, undefined, redirectUri);
+    validateClientScope(client, scope);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Invalid client or redirect_uri';
+    const msg = err instanceof Error ? err.message : 'Invalid client or parameters';
+    if (msg.includes('Scope')) {
+      return c.redirect(
+        `${redirectUri}?error=invalid_scope&error_description=${encodeURIComponent(msg)}${state ? `&state=${encodeURIComponent(state)}` : ''}`
+      );
+    }
     return c.text(msg, 400);
   }
 
@@ -123,6 +137,7 @@ oauthRoutes.post('/oauth/consent', async (c) => {
   const codeChallenge = (body.code_challenge as string) || '';
   const codeChallengeMethod = (body.code_challenge_method as string) || 'S256';
   const state = (body.state as string) || undefined;
+  const nonce = (body.nonce as string) || undefined;
 
   // Validate session
   const sessionId = getCookie(c, SESSION_COOKIE_NAME);
@@ -135,11 +150,20 @@ oauthRoutes.post('/oauth/consent', async (c) => {
     return c.redirect('/login');
   }
 
-  // Validate client & redirectUri
+  // Validate client & redirectUri & scope
+  let client;
   try {
-    await validateClient(c.env.DB, clientId, undefined, redirectUri);
+    client = await validateClient(c.env.DB, clientId, undefined, redirectUri);
+    validateClientScope(client, scope);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Invalid client or redirect_uri';
+    const msg = err instanceof Error ? err.message : 'Invalid client or parameters';
+    if (msg.includes('Scope')) {
+      const errorUrl = new URL(redirectUri);
+      errorUrl.searchParams.set('error', 'invalid_scope');
+      errorUrl.searchParams.set('error_description', msg);
+      if (state) errorUrl.searchParams.set('state', state);
+      return c.redirect(errorUrl.toString());
+    }
     return c.text(msg, 400);
   }
 
@@ -160,6 +184,7 @@ oauthRoutes.post('/oauth/consent', async (c) => {
     scope,
     codeChallenge,
     codeChallengeMethod,
+    nonce,
   });
 
   const successUrl = new URL(redirectUri);
@@ -171,6 +196,9 @@ oauthRoutes.post('/oauth/consent', async (c) => {
 
 // POST /oauth/token
 oauthRoutes.post('/oauth/token', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  c.header('Pragma', 'no-cache');
+
   let body: Record<string, unknown> = {};
   try {
     body = (await c.req.parseBody()) as Record<string, unknown>;
@@ -231,6 +259,7 @@ oauthRoutes.post('/oauth/token', async (c) => {
             clientId,
             user,
             scope: tokenRes.scope,
+            nonce: tokenRes.nonce || undefined,
           });
           responsePayload.id_token = idToken;
         }

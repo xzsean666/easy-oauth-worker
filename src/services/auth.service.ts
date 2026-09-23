@@ -272,8 +272,13 @@ export async function resetPasswordWithToken(
     token
   );
 
-  // Revoke all existing sessions for security
+  // Revoke all existing sessions and active OAuth tokens for security
   await revokeAllUserSessions(db, tokenRecord.user_id);
+  await execute(
+    db,
+    'UPDATE oauth_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0',
+    tokenRecord.user_id
+  );
 
   const updatedUser = await queryFirst<User>(
     db,
@@ -333,8 +338,13 @@ export async function changePassword(
     userId
   );
 
-  // Revoke all sessions on password change
+  // Revoke all sessions and active OAuth tokens on password change
   await revokeAllUserSessions(db, userId);
+  await execute(
+    db,
+    'UPDATE oauth_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0',
+    userId
+  );
 
   const updatedUser = await queryFirst<User>(
     db,

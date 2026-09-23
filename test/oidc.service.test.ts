@@ -100,7 +100,8 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
       expect(verified.email).toBe('oidc.tester@example.com');
       expect(verified.email_verified).toBe(true);
       expect(verified.nonce).toBe('nonce_random_abc');
-      expect(verified.auth_time).toBe(mockUser.created_at);
+      expect(typeof verified.auth_time).toBe('number');
+      expect(verified.auth_time).toBeGreaterThan(0);
     });
 
     it('omits email claim when email scope is not requested', async () => {

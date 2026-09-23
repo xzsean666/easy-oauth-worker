@@ -13,7 +13,8 @@ export const oidcRoutes = new Hono<AppContext>();
 
 // GET /.well-known/openid-configuration
 oidcRoutes.get('/.well-known/openid-configuration', (c) => {
-  const config = getOpenIdConfiguration(c.env.AUTH_URL);
+  const issuer = c.env?.AUTH_URL || new URL(c.req.url).origin;
+  const config = getOpenIdConfiguration(issuer);
   return c.json(config);
 });
 

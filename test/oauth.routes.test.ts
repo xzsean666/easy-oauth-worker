@@ -5,6 +5,7 @@ import { registerUser } from '../src/services/auth.service';
 import { createSession } from '../src/services/session.service';
 import { execute } from '../src/db/client';
 import { generateCodeChallenge } from '../src/crypto/pkce';
+import { decodeJwt } from '../src/crypto/jwt';
 import type { Bindings } from '../src/types/env';
 
 describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
@@ -153,6 +154,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
         code_challenge: challenge,
         code_challenge_method: 'S256',
         state: 'state_random_789',
+        nonce: 'nonce_custom_999',
       });
 
       const consentRes = await app.request(
@@ -201,6 +203,9 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
       );
 
       expect(tokenRes.status).toBe(200);
+      expect(tokenRes.headers.get('Cache-Control')).toBe('no-store');
+      expect(tokenRes.headers.get('Pragma')).toBe('no-cache');
+
       const tokens = (await tokenRes.json()) as {
         access_token: string;
         token_type: string;
@@ -213,6 +218,10 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
       expect(tokens.access_token).toBeDefined();
       expect(tokens.refresh_token).toBeDefined();
       expect(tokens.id_token).toBeDefined();
+
+      // Verify ID Token includes the requested nonce
+      const decodedIdToken = decodeJwt<{ nonce?: string }>(tokens.id_token!);
+      expect(decodedIdToken.payload.nonce).toBe('nonce_custom_999');
 
       // Step 3: GET /oauth/userinfo with Bearer token
       const userinfoRes = await app.request(

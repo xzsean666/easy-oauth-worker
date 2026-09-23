@@ -9,6 +9,11 @@ import {
   resetPasswordWithToken,
 } from '../services/auth.service';
 import { validateSession, revokeSession } from '../services/session.service';
+import { sendEmail } from '../services/email.service';
+import {
+  getVerifyEmailTemplate,
+  getResetPasswordTemplate,
+} from '../views/email/templates';
 import { LoginView } from '../views/auth/login';
 import { RegisterView } from '../views/auth/register';
 import { ForgotPasswordView } from '../views/auth/forgot-password';
@@ -25,22 +30,56 @@ function isSecure(url: string): boolean {
   return url.startsWith('https://');
 }
 
+/**
+ * Sanitizes return_to URL to prevent Open Redirect attacks.
+ * Only allows relative paths or same-origin URLs.
+ */
+export function sanitizeReturnTo(
+  returnTo: string | null | undefined,
+  currentUrl: string,
+  authUrl?: string
+): string {
+  if (!returnTo) return '/';
+  const trimmed = returnTo.trim();
+  if (!trimmed) return '/';
+
+  // Safe relative path: starts with single slash, not followed by / or \
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const reqOrigin = new URL(currentUrl).origin;
+    const configuredOrigin = authUrl ? new URL(authUrl).origin : null;
+
+    if (parsed.origin === reqOrigin || (configuredOrigin && parsed.origin === configuredOrigin)) {
+      return parsed.pathname + parsed.search + parsed.hash;
+    }
+  } catch {
+    // Malformed URL, fallback to default
+  }
+
+  return '/';
+}
+
 // GET /login
 authRoutes.get('/login', async (c) => {
   const sessionId = getCookie(c, SESSION_COOKIE_NAME);
-  const returnTo = c.req.query('return_to');
+  const rawReturnTo = c.req.query('return_to');
+  const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
 
   if (sessionId) {
     const valid = await validateSession(c.env.DB, sessionId);
     if (valid) {
-      return c.redirect(returnTo || '/');
+      return c.redirect(safeReturnTo);
     }
   }
 
   return c.html(
     LoginView({
       siteName: c.env.SITE_NAME,
-      returnTo,
+      returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
     })
   );
 });
@@ -50,7 +89,8 @@ authRoutes.post('/login', async (c) => {
   const body = await c.req.parseBody();
   const email = (body.email as string) || '';
   const password = (body.password as string) || '';
-  const returnTo = (body.return_to as string) || undefined;
+  const rawReturnTo = (body.return_to as string) || undefined;
+  const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
   const userAgent = c.req.header('user-agent') || null;
 
   try {
@@ -64,7 +104,7 @@ authRoutes.post('/login', async (c) => {
       maxAge: SESSION_COOKIE_MAX_AGE,
     });
 
-    return c.redirect(returnTo || '/');
+    return c.redirect(safeReturnTo);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Invalid credentials';
     c.status(400);
@@ -73,7 +113,7 @@ authRoutes.post('/login', async (c) => {
         siteName: c.env.SITE_NAME,
         error: errorMsg,
         email,
-        returnTo,
+        returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
       })
     );
   }
@@ -82,19 +122,20 @@ authRoutes.post('/login', async (c) => {
 // GET /register
 authRoutes.get('/register', async (c) => {
   const sessionId = getCookie(c, SESSION_COOKIE_NAME);
-  const returnTo = c.req.query('return_to');
+  const rawReturnTo = c.req.query('return_to');
+  const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
 
   if (sessionId) {
     const valid = await validateSession(c.env.DB, sessionId);
     if (valid) {
-      return c.redirect(returnTo || '/');
+      return c.redirect(safeReturnTo);
     }
   }
 
   return c.html(
     RegisterView({
       siteName: c.env.SITE_NAME,
-      returnTo,
+      returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
     })
   );
 });
@@ -105,7 +146,8 @@ authRoutes.post('/register', async (c) => {
   const email = (body.email as string) || '';
   const password = (body.password as string) || '';
   const confirmPassword = (body.confirm_password as string) || '';
-  const returnTo = (body.return_to as string) || undefined;
+  const rawReturnTo = (body.return_to as string) || undefined;
+  const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
 
   if (password !== confirmPassword) {
     c.status(400);
@@ -114,13 +156,24 @@ authRoutes.post('/register', async (c) => {
         siteName: c.env.SITE_NAME,
         error: 'Passwords do not match',
         email,
-        returnTo,
+        returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
       })
     );
   }
 
   try {
-    await registerUser(c.env.DB, email, password);
+    const { verificationToken } = await registerUser(c.env.DB, email, password);
+
+    const authBaseUrl = (c.env.AUTH_URL || '').replace(/\/+$/, '') || new URL(c.req.url).origin;
+    const verifyUrl = `${authBaseUrl}/verify-email?token=${verificationToken}`;
+    const emailTemplate = getVerifyEmailTemplate(c.env.SITE_NAME || 'EasyOAuth', verifyUrl);
+
+    await sendEmail(c.env, {
+      to: email,
+      subject: emailTemplate.subject,
+      html: emailTemplate.html,
+      text: emailTemplate.text,
+    });
 
     return c.html(
       VerifyEmailView({
@@ -137,7 +190,7 @@ authRoutes.post('/register', async (c) => {
         siteName: c.env.SITE_NAME,
         error: errorMsg,
         email,
-        returnTo,
+        returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
       })
     );
   }
@@ -195,7 +248,19 @@ authRoutes.post('/forgot-password', async (c) => {
   const email = (body.email as string) || '';
 
   try {
-    await createPasswordResetToken(c.env.DB, email);
+    const resetData = await createPasswordResetToken(c.env.DB, email);
+    if (resetData) {
+      const authBaseUrl = (c.env.AUTH_URL || '').replace(/\/+$/, '') || new URL(c.req.url).origin;
+      const resetUrl = `${authBaseUrl}/reset-password?token=${resetData.token}`;
+      const emailTemplate = getResetPasswordTemplate(c.env.SITE_NAME || 'EasyOAuth', resetUrl);
+
+      await sendEmail(c.env, {
+        to: resetData.user.email,
+        subject: emailTemplate.subject,
+        html: emailTemplate.html,
+        text: emailTemplate.text,
+      });
+    }
   } catch {
     // Suppress errors to avoid account enumeration
   }

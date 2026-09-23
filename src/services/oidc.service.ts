@@ -137,7 +137,7 @@ export async function generateIdToken(
     aud: params.clientId,
     iat: now,
     exp: now + 3600, // 1 hour validity
-    auth_time: params.user.created_at,
+    auth_time: now,
   };
 
   if (params.nonce) {

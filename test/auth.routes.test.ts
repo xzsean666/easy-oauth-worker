@@ -137,6 +137,69 @@ describe('Auth Routes and Web UI Integration Tests', () => {
       const html = await res.text();
       expect(html).toContain('Invalid email or password');
     });
+
+    it('prevents Open Redirect by sanitizing external return_to urls to /', async () => {
+      await registerUser(db, 'safe_redirect@example.com', 'ValidPassword123!');
+
+      const evilFormData = new URLSearchParams({
+        email: 'safe_redirect@example.com',
+        password: 'ValidPassword123!',
+        return_to: 'https://evil-phishing.com/steal-creds',
+      });
+
+      const evilRes = await app.request(
+        '/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: evilFormData.toString(),
+        },
+        mockEnv
+      );
+
+      expect(evilRes.status).toBe(302);
+      expect(evilRes.headers.get('Location')).toBe('/');
+
+      // Also verify protocol-relative URL //evil.com
+      const protoRelFormData = new URLSearchParams({
+        email: 'safe_redirect@example.com',
+        password: 'ValidPassword123!',
+        return_to: '//evil-phishing.com',
+      });
+
+      const protoRelRes = await app.request(
+        '/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: protoRelFormData.toString(),
+        },
+        mockEnv
+      );
+
+      expect(protoRelRes.status).toBe(302);
+      expect(protoRelRes.headers.get('Location')).toBe('/');
+
+      // Verify legitimate relative path is preserved
+      const validFormData = new URLSearchParams({
+        email: 'safe_redirect@example.com',
+        password: 'ValidPassword123!',
+        return_to: '/oauth/authorize?client_id=123',
+      });
+
+      const validRes = await app.request(
+        '/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: validFormData.toString(),
+        },
+        mockEnv
+      );
+
+      expect(validRes.status).toBe(302);
+      expect(validRes.headers.get('Location')).toBe('/oauth/authorize?client_id=123');
+    });
   });
 
   describe('GET /verify-email', () => {
@@ -166,6 +229,23 @@ describe('Auth Routes and Web UI Integration Tests', () => {
       await registerUser(db, 'forgot@example.com', 'OldPassword123!');
       const resetTokenData = await createPasswordResetToken(db, 'forgot@example.com');
       const token = resetTokenData!.token;
+
+      // POST /forgot-password
+      const forgotFormData = new URLSearchParams({
+        email: 'forgot@example.com',
+      });
+      const postForgot = await app.request(
+        '/forgot-password',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: forgotFormData.toString(),
+        },
+        mockEnv
+      );
+      expect(postForgot.status).toBe(200);
+      const forgotHtml = await postForgot.text();
+      expect(forgotHtml).toContain('instructions have been sent');
 
       // GET /reset-password
       const getReset = await app.request(`/reset-password?token=${token}`, {}, mockEnv);

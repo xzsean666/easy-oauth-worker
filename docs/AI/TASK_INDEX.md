@@ -14,3 +14,7 @@
 | [TASK-010](tasks/TASK-010.md) | 管理控制台核心服务与 API | DONE | TASK-002, TASK-004, TASK-007 | 管理员鉴权、用户管理 API、客户端管理 API、系统状态统计 |
 | [TASK-011](tasks/TASK-011.md) | 管理控制台 Web UI 界面 | DONE | TASK-010, TASK-005 | `/admin` 仪表盘、用户列表及操作、OAuth 客户端管理及 Secret 轮换界面 |
 | [TASK-012](tasks/TASK-012.md) | 全流程端到端集成测试与生产部署规范 | DONE | TASK-009, TASK-011, TASK-006 | OAuth 2.0 / OIDC 完整授权链端到端自动化测试、初始数据种子与部署指南 |
+| [TASK-013](tasks/TASK-013.md) | OIDC 协议符合性与基础认证安全修复 | DONE | TASK-012 | 修复 Nonce 丢失与回填、Open Redirect 漏洞防护、Token 端点防缓存头 |
+| [TASK-014](tasks/TASK-014.md) | OAuth 2.0 权限边界与凭据生命周期加固 | DONE | TASK-013 | allowed_scopes 校验、Refresh Token 范围提权防护、30天过期校验与级联吊销 |
+| [TASK-015](tasks/TASK-015.md) | 邮件服务全链路业务闭环与开发模式增强 | DONE | TASK-014 | 注册与密码重置真实发信闭环、优雅降级与 SMTP 超时保护 |
+| [TASK-016](tasks/TASK-016.md) | 跨域支持、安全响应头与定时数据清理 | DONE | TASK-015 | CORS 中间件、Clickjacking 防御、Cron 数据清理与全局错误捕获 |

@@ -197,6 +197,19 @@ describe('Auth Service and Session Service Tests', () => {
       expect(resetData).not.toBeNull();
       expect(resetData?.token).toBeDefined();
 
+      // Seed an active OAuth client and token for this user
+      await execute(
+        db,
+        `INSERT INTO oauth_clients (client_id, client_secret, client_name, redirect_uris, allowed_scopes, is_public, created_at, updated_at)
+         VALUES ('client_reset_test', 'secret', 'Reset App', '["https://example.com"]', '["openid"]', 0, 1000, 1000)`
+      );
+      await execute(
+        db,
+        `INSERT INTO oauth_tokens (id, client_id, user_id, access_token, refresh_token, scope, expires_at, revoked, created_at)
+         VALUES ('tok_reset_test', 'client_reset_test', ?, 'at_reset_test', 'rt_reset_test', 'openid', 9999999999, 0, 1000)`,
+        user.id
+      );
+
       const updatedUser = await resetPasswordWithToken(
         db,
         resetData!.token,
@@ -220,6 +233,12 @@ describe('Auth Service and Session Service Tests', () => {
       // Old session was revoked
       const oldSessCheck = await validateSession(db, initialSession.id);
       expect(oldSessCheck).toBeNull();
+
+      // OAuth token was revoked
+      const tokenRow = await db.prepare('SELECT revoked FROM oauth_tokens WHERE id = ?')
+        .bind('tok_reset_test')
+        .first<{ revoked: number }>();
+      expect(tokenRow?.revoked).toBe(1);
     });
 
     it('returns null when requesting reset for non-existent email', async () => {
@@ -229,9 +248,22 @@ describe('Auth Service and Session Service Tests', () => {
   });
 
   describe('Password Change Flow', () => {
-    it('changes password when old password matches and invalidates old sessions', async () => {
+    it('changes password when old password matches and invalidates old sessions and oauth tokens', async () => {
       const { user } = await registerUser(db, 'change@example.com', 'CurrentPassword123!');
       const session = await createSession(db, user.id);
+
+      // Seed an active OAuth client and token for this user
+      await execute(
+        db,
+        `INSERT INTO oauth_clients (client_id, client_secret, client_name, redirect_uris, allowed_scopes, is_public, created_at, updated_at)
+         VALUES ('client_change_test', 'secret', 'Change App', '["https://example.com"]', '["openid"]', 0, 1000, 1000)`
+      );
+      await execute(
+        db,
+        `INSERT INTO oauth_tokens (id, client_id, user_id, access_token, refresh_token, scope, expires_at, revoked, created_at)
+         VALUES ('tok_change_test', 'client_change_test', ?, 'at_change_test', 'rt_change_test', 'openid', 9999999999, 0, 1000)`,
+        user.id
+      );
 
       await changePassword(db, user.id, 'CurrentPassword123!', 'NewPassword789!');
 
@@ -247,6 +279,12 @@ describe('Auth Service and Session Service Tests', () => {
 
       // Old session revoked
       expect(await validateSession(db, session.id)).toBeNull();
+
+      // OAuth token was revoked
+      const tokenRow = await db.prepare('SELECT revoked FROM oauth_tokens WHERE id = ?')
+        .bind('tok_change_test')
+        .first<{ revoked: number }>();
+      expect(tokenRow?.revoked).toBe(1);
     });
 
     it('rejects password change if current password is wrong', async () => {

@@ -37,6 +37,7 @@ export interface OAuthAuthorizationCode {
   scope: string;
   code_challenge: string;
   code_challenge_method: string;
+  nonce?: string | null;
   expires_at: number;
   used: number; // 0 or 1
   created_at: number;
