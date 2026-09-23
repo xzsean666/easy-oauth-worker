@@ -185,7 +185,13 @@ pnpm run test:watch
 
 # Run TypeScript typecheck
 pnpm run typecheck
+
+# Run headless Chromium E2E visual tests & generate screenshots
+pnpm run test:visual
 ```
+
+> 📸 **Visual Testing & UI/UX Gallery**: Check out [docs/VISUAL_TEST_REPORT.md](docs/VISUAL_TEST_REPORT.md) for 12 high-resolution screenshots covering Desktop & Mobile views (Login, Register, Admin Dashboard, Users, OAuth Clients, Settings, and OAuth 2.0 Consent screen).
+
 
 ---
 
@@ -226,13 +232,66 @@ SMTP_PASSWORD="your16charpassword"
 
 ## ☁️ Production Deployment
 
-### 1. Create Cloudflare D1 Production Database
+`easy-oauth-worker` 同时支持部署到 **Cloudflare Pages** 与 **Cloudflare Workers**。
+
+### 方式一：部署到 Cloudflare Pages (推荐)
+
+Cloudflare Pages 拥有免费独立的 `.pages.dev` 域名、免费 SSL、全球边缘就近分发以及对静态资源的高性能加速。
+
+#### 1. 一键全自动部署脚本
+
+项目提供了一键自动化部署脚本 [`scripts/deploy-pages.sh`](file:///ssd0/git/easy-oauth-worker/scripts/deploy-pages.sh)，**默认即为秒级极速发布**，直接运行即可发布代码并自动绑定 D1 数据库：
+
+```bash
+# ⚡ 极速秒级部署 (默认模式，2~3秒发布，自动绑定已有 D1 数据库)
+pnpm run deploy:pages
+# 或直接运行
+bash scripts/deploy-pages.sh
+
+# 完整自检与迁移模式 (包含类型检查、Vitest 测试套件与 D1 迁移)
+bash scripts/deploy-pages.sh --full
+
+# 或部署并灌入初始种子数据
+bash scripts/deploy-pages.sh --seed
+```
+
+#### 2. 部署脚本参数说明
+
+| 参数 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `-f, --fast` | `true` | **极速模式**（默认行为）：跳过测试与 D1 迁移，非交互式秒级直接发布 Pages |
+| `-t, --test` | `false` | 部署前显式运行 TypeScript 检查与 Vitest 测试套件 |
+| `-m, --migrate` | `false` | 部署前显式执行远程 D1 数据库 Schema 迁移 |
+| `--full` | `false` | 完整自检模式（执行测试、D1 迁移、交互确认） |
+| `-p, --project-name` | `easy-oauth-worker` | Cloudflare Pages 项目名称 |
+| `-b, --branch` | `main` | 绑定的 Git 分支名称 |
+| `-d, --db-name` | `easy-oauth-db` | Cloudflare D1 数据库名称 |
+| `-i, --db-id` | `wrangler.toml` | Cloudflare D1 数据库 UUID（自动绑定至 Pages `DB` 变量） |
+| `--seed` | `false` | 迁移完成后自动注入初始种子数据 (`scripts/seed.sql`) |
+| `-h, --help` | - | 查看命令行帮助信息 |
+
+#### 3. 自动化 D1 持久化绑定机制
+
+脚本内置了 Cloudflare Pages 原生 D1 自动绑定能力：
+- 当脚本创建或识别到真实有效的 D1 `database_id`（或通过 `--db-id <UUID>` 传入）时，部署阶段会自动生成兼容 Pages 的专用配置，**自动将 `[[d1_databases]] binding = "DB"` 绑定到 Pages Functions 运行时**，部署完成即刻享有数据库读写能力，**无需在控制台手动绑定**！
+- 若因 API Token 缺少 D1 权限导致无法自动建库，可在 Cloudflare Dashboard 创建 D1 数据库后，直接带参运行：
+  ```bash
+  bash scripts/deploy-pages.sh --db-id <YOUR_D1_UUID>
+  ```
+  即可一键完成自动绑定与发布！
+
+
+---
+
+### 方式二：部署到 Cloudflare Workers
+
+#### 1. 创建 Cloudflare D1 生产数据库
 
 ```bash
 npx wrangler d1 create easy-oauth-db
 ```
 
-Wrangler will output the database details:
+Wrangler 会输出数据库元数据：
 ```
 ✅ Successfully created DB 'easy-oauth-db'
 {
@@ -242,27 +301,30 @@ Wrangler will output the database details:
 }
 ```
 
-Update the `database_id` under `[[d1_databases]]` in `wrangler.toml` with this ID.
+将该 ID 填入 `wrangler.toml` 中的 `database_id`。
 
-### 2. Apply Schema Migrations to Production
+#### 2. 执行远程数据库迁移
 
 ```bash
 npx wrangler d1 migrations apply easy-oauth-db --remote
 ```
 
-### 3. Initialize Production Seed Data (Optional)
+#### 3. 注入初始种子数据 (可选)
 
 ```bash
 npx wrangler d1 execute easy-oauth-db --remote --file=scripts/seed.sql
 ```
 
-### 4. Update Production Domain
+#### 4. 配置生产域名与密钥并部署 Worker
 
-Update `AUTH_URL` in `wrangler.toml` to your production domain (e.g. `https://auth.yourdomain.com`).
-
-### 5. Deploy the Worker
+更新 `wrangler.toml` 中的 `AUTH_URL` 为生产域名，设置密钥后发布：
 
 ```bash
+npx wrangler secret put SESSION_SECRET
+npx wrangler secret put OIDC_SIGNING_KEY
+npx wrangler secret put SMTP_PASSWORD
+npx wrangler secret put SMTP_USERNAME
+
 pnpm run deploy
 ```
 

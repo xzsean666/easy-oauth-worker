@@ -117,6 +117,21 @@ export class SmtpBufferWriter {
   }
 }
 
+export function extractEmailAddress(addr: string): string {
+  const match = addr.match(/<([^>]+)>/);
+  return (match ? match[1] : addr).trim();
+}
+
+export function parseEmailAddress(addr: string): { email: string; name?: string } {
+  const match = addr.match(/^(?:"?([^"]*)"?\s)?(?:<([^>]+)>|([^\s<]+))$/);
+  if (match) {
+    const name = match[1]?.trim();
+    const email = (match[2] || match[3] || '').trim();
+    return { email, name: name || undefined };
+  }
+  return { email: addr.trim() };
+}
+
 export async function sendSmtpEmail(
   config: {
     host: string;
@@ -129,9 +144,17 @@ export async function sendSmtpEmail(
   email: EmailOptions,
   connector?: SocketConnector
 ): Promise<{ success: boolean; messageId?: string }> {
-  const fromAddr = email.from || config.from;
-  if (/[\r\n]/.test(fromAddr) || /[\r\n]/.test(email.to)) {
+  const rawFrom = email.from || config.from;
+  const rawTo = email.to;
+
+  if (/[\r\n]/.test(rawFrom) || /[\r\n]/.test(rawTo)) {
     throw new Error('Invalid email address: CRLF characters detected');
+  }
+
+  const fromEmail = extractEmailAddress(rawFrom);
+  const toEmail = extractEmailAddress(rawTo);
+  if (!fromEmail || !toEmail) {
+    throw new Error('Invalid email address: empty from or to address');
   }
 
   let socketConnector = connector;
@@ -210,14 +233,14 @@ export async function sendSmtpEmail(
     }
 
     // 5. MAIL FROM
-    await writer.writeCommand(`MAIL FROM:<${fromAddr}>`);
+    await writer.writeCommand(`MAIL FROM:<${fromEmail}>`);
     const mailFromRes = await reader.readResponse();
     if (mailFromRes.code !== 250) {
       throw new Error(`MAIL FROM failed: ${mailFromRes.code} ${mailFromRes.lines.join(' ')}`);
     }
 
     // 6. RCPT TO
-    await writer.writeCommand(`RCPT TO:<${email.to}>`);
+    await writer.writeCommand(`RCPT TO:<${toEmail}>`);
     const rcptToRes = await reader.readResponse();
     if (rcptToRes.code !== 250) {
       throw new Error(`RCPT TO failed: ${rcptToRes.code} ${rcptToRes.lines.join(' ')}`);
@@ -232,12 +255,15 @@ export async function sendSmtpEmail(
 
     // 8. Compose and send email content
     const boundary = `boundary_${Date.now()}_${Math.random().toString(36).substring(2)}`;
-    const fromHeader = config.fromName ? `"${config.fromName}" <${fromAddr}>` : fromAddr;
+    const parsedFrom = parseEmailAddress(rawFrom);
+    const displayName = config.fromName || email.fromName || parsedFrom.name;
+    const fromHeader = displayName ? `"${displayName.replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
+    const toHeader = email.to.includes('<') ? email.to : `<${toEmail}>`;
     const encodedSubject = `=?UTF-8?B?${stringToBase64(email.subject)}?=`;
 
     const rawMessage = [
       `From: ${fromHeader}`,
-      `To: <${email.to}>`,
+      `To: ${toHeader}`,
       `Subject: ${encodedSubject}`,
       `Date: ${new Date().toUTCString()}`,
       `MIME-Version: 1.0`,

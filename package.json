@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "pages:dev": "wrangler pages dev public",
+    "deploy:pages": "bash scripts/deploy-pages.sh",
+    "deploy:fast": "bash scripts/deploy-pages.sh --fast",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:email": "node --experimental-strip-types scripts/test-email.ts",
+    "test:visual": "node scripts/visual-test.js"
   },
   "dependencies": {
     "hono": "^4.7.4"

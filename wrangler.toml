@@ -8,11 +8,12 @@ AUTH_URL = "http://localhost:8787"
 SITE_NAME = "easy-oauth-worker"
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = "465"
+SMTP_FROM = "EasyOAuth 认证中心 <cloud.mailer.service@gmail.com>"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "easy-oauth-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "8702c798-a252-452d-a8a6-6ad77ccdbc61"
 migrations_dir = "migrations"
 
 [triggers]

@@ -1,0 +1,69 @@
+# ==============================================================================
+# easy-oauth-worker 环境变量示例配置
+# ==============================================================================
+# 【说明】：
+# 本项目基于 Cloudflare Workers 架构运行：
+# 1. 本地开发 (Local Dev):
+#    Cloudflare Wrangler 默认读取根目录的 `.dev.vars` 文件（格式与 .env 完全一致）。
+#    可直接复制此文件：
+#      cp .env.example .dev.vars
+#    启动本地开发服务：
+#      pnpm run dev
+#
+# 2. 生产环境部署 (Production):
+#    - 非敏感变量（如 AUTH_URL, SITE_NAME 等）可直接在 wrangler.toml 的 [vars] 段中配置。
+#    - 敏感保密变量（如密码、签名私钥、Session Secret）请通过 Wrangler Secret 注入：
+#      npx wrangler secret put SMTP_PASSWORD
+#      npx wrangler secret put SESSION_SECRET
+#      npx wrangler secret put OIDC_SIGNING_KEY
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. 基础服务配置 (Base Configuration)
+# ------------------------------------------------------------------------------
+# 服务的对外完整访问 URL 基地址（末尾请勿加斜杠）
+# 用于 OIDC Issuer 标识、OAuth 重定向合法性校验、CSRF 来源比对、邮件重置链接等
+# 本地开发默认为：http://localhost:8787
+# 生产部署时改为你的实际域名，例如：https://oauth.yourdomain.com
+AUTH_URL="http://localhost:8787"
+
+# 站点名称（展示在登录/注册表单、授权确认 Consent 页面以及邮件模版通知中）
+SITE_NAME="easy-oauth-worker"
+
+# ------------------------------------------------------------------------------
+# 2. 会话与安全密钥配置 (Security & Session)
+# ------------------------------------------------------------------------------
+# 用于 HMAC-SHA256 签名 CSRF Token 和增强会话安全性的随机密钥（建议 32 位以上随机字符串）
+# 本地可任意填写；生产环境推荐用随机生成，如命令：openssl rand -hex 32
+SESSION_SECRET="your-super-secret-session-key-at-least-32-chars-long"
+
+# OIDC ID Token RS256 签名私钥（JWK 格式的单行 JSON 字符串）
+# 若留空，程序启动时会在内存中自动临时生成一把 RSA-2048 密钥（但 Worker 重启或多实例时会导致之前签发的 ID Token 失效）。
+# 生产环境强烈建议配置固定私钥！可通过本项目内置的脚本一键生成：
+#   npx tsx scripts/generate-keys.ts
+# 然后将输出的 OIDC_SIGNING_KEY JSON 字符串粘贴到下方（或通过 npx wrangler secret put OIDC_SIGNING_KEY 设定）：
+OIDC_SIGNING_KEY=""
+
+# ------------------------------------------------------------------------------
+# 3. 邮件发信服务配置 (Gmail SMTP / Cloudflare Sockets)
+# ------------------------------------------------------------------------------
+# 用于发送注册邮箱验证码/链接以及找回密码重置链接。
+# 项目原生使用 Cloudflare Workers TCP Sockets (cloudflare:sockets) 直连 Gmail SMTP 465 SSL/TLS 端口。
+# 若暂不配置 SMTP_USERNAME / SMTP_PASSWORD，系统会自动降级并在控制台输出包含链接的 Log，不影响主流程测试。
+#
+# SMTP 服务器地址（默认 Gmail）
+SMTP_HOST="smtp.gmail.com"
+
+# SMTP 服务端口（Gmail SSL 端口固定为 465）
+SMTP_PORT="465"
+
+# 发信 Gmail 邮箱地址
+SMTP_USERNAME="your-email@gmail.com"
+
+# Google 账号 16 位专用应用密码 (App Password，无空格)
+# 获取方法：Google 账号管理 -> 安全性 -> 两步验证 -> 应用专用密码 (App passwords)
+SMTP_PASSWORD="your16charpassword"
+
+# 发件人显示名称与地址（可选，缺省时自动使用 SMTP_USERNAME）
+# 示例："EasyOAuth <your-email@gmail.com>"
+SMTP_FROM="easy-oauth-worker <your-email@gmail.com>"

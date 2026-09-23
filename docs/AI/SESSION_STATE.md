@@ -1,47 +1,33 @@
 # Session State
 
 - **当前 Goal**: 构建轻量级自托管 OAuth 2.0 / OpenID Connect Provider (`easy-oauth-worker`)
-- **当前 Task**: TASK-017 (全方位安全性、生产就绪度与性能加固优化)
-- **当前状态**: ALL AUDIT & HARDENING TASKS COMPLETED (DONE)
+- **当前 Task**: TASK-023 (默认启用极速部署模式与按需深度校验支持)
+- **当前状态**: COMPLETED (DONE)
 - **已完成内容**:
-  - **TASK-017 (全方位安全性、生产就绪度与性能加固优化)**:
-    - **Session-Bound CSRF 防护**: 基于原生 Web Crypto HMAC-SHA256 实现零数据库开销的 CSRF 防护（`src/crypto/csrf.ts`），覆盖 `/oauth/consent` 与管理后台所有状态变更表单（`/admin/clients`、`/admin/users/:id/action`、`/admin/clients/:id/rotate`、`/admin/clients/:id/delete`）。
-    - **敏感凭据脱敏**: 消除新建 Client 与轮换 Secret 时重定向 URL 中的 `new_secret`，采用安全且短期的 Flash Cookie（`admin_flash_secret`）一次性安全展示后立即自动销毁。
-    - **Token 定时清理逻辑修复**: 修正 `cleanupExpiredData`，不仅清理被撤销的 Token，而且彻底清理自然过期的 access_token 以及超出 30 天生命周期的 refresh_token，彻底解决数据库膨胀隐患。
-    - **DoS 与密码防护**: 限制密码长度上限为 128 字符，杜绝超长字符串引发 PBKDF2 100,000 轮哈希导致的 CPU 耗尽 DoS 攻击。
-    - **轻量内存频控 (Rate Limiting)**: 在 `src/middlewares/rate-limit.ts` 实现 O(1) 零数据库开销的滑动窗口频控，挂载于 `/login`、`/register` 与 `/forgot-password`。
-    - **管理员防自锁死**: 在 `updateUserStatus` 中禁止当前管理员取消自身的管理员权限或禁用自身账号。
-    - **SMTP 命令注入防御**: 在 `sendSmtpEmail` 建立 socket 前校验 `from` 与 `to` 地址中的 CRLF 换行字符。
-    - **OIDC 生产私钥保障**: 在 `getSigningKey` 中若未配置 `OIDC_SIGNING_KEY` 环境变量则输出高优先级生产警告，并提供一键生成生产 RSA-2048 JWK 的脚本 `scripts/generate-keys.ts`。
-  - **自动化测试全覆盖**:
-    - 新增 `test/security.test.ts`，涵盖 CSRF 拦截/防伪造、密码长度限制、管理员自保护、SMTP CRLF 防护、Token 垃圾回收和内存频控测试。
-    - 现有 12 个测试套件 + 新增 1 个安全套件，共计 13 个套件、120 个自动化测试全部一次性绿灯通过。
+  - **默认极速部署 (Default Fast Mode)**:
+    - 将 `scripts/deploy-pages.sh` 的默认行为全面升级为 Fast 模式：直接执行 `bash scripts/deploy-pages.sh` 或 `pnpm run deploy:pages`，跳过耗时的测试套件与重复 D1 迁移探测，非交互式直发 Pages。
+    - 自动提取并复用已有的生产 D1 数据库 UUID（`8702c798-a252-452d-a8a6-6ad77ccdbc61`），动态配置 Pages 绑定 `DB`，2~3 秒内秒级完成代码发布与自动绑定。
+  - **按需扩展参数支持**:
+    - 增加 `--test` / `-t`：显式触发类型检查与测试套件；
+    - 增加 `--migrate` / `-m`：显式触发远程 D1 数据库 Schema 迁移；
+    - 增加 `--full`：一键全套自检与迁移；
+    - 完美保持所有原有参数（`--fast`, `--skip-tests`, `--skip-migrate`, `--seed`, `--db-id` 等）向后兼容。
+  - **文档与测试套件保障**:
+    - 更新 `README.md`，将默认秒级极速发布作为基础推荐命令。
+    - 保持全部 15 个自动化测试套件（129 个用例）和 TypeScript 类型检查 100% 通过。
 - **修改过的文件**:
+  - `scripts/deploy-pages.sh`
+  - `README.md`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
-  - `src/index.ts`
-  - `src/routes/admin-api.ts`
-  - `src/routes/admin-web.tsx`
-  - `src/routes/auth.ts`
-  - `src/routes/oauth.ts`
-  - `src/services/admin.service.ts`
-  - `src/services/auth.service.ts`
-  - `src/services/email.service.ts`
-  - `src/services/oidc.service.ts`
-  - `src/views/admin/clients.tsx`
-  - `src/views/admin/users.tsx`
-  - `src/views/oauth/consent.tsx`
-  - `test/admin.web.test.ts`
-  - `test/e2e.test.ts`
-  - `test/oauth.routes.test.ts`
 - **创建过的文件**:
-  - `docs/AI/tasks/TASK-017.md`
-  - `scripts/generate-keys.ts`
-  - `src/crypto/csrf.ts`
-  - `src/middlewares/rate-limit.ts`
-  - `test/security.test.ts`
+  - `docs/AI/tasks/TASK-023.md`
 - **已运行的验证命令及结果**:
+  - `bash scripts/deploy-pages.sh` (退出码 0，直接运行默认秒级发布成功，自动绑定 D1，耗时约 2 秒)
+  - `bash scripts/deploy-pages.sh --help` (退出码 0，包含完整的默认与按需选项)
+  - `pnpm test test/pages-deploy.test.ts` (5/5 全部通过)
   - `pnpm run typecheck` (退出码 0，TypeScript 检查 0 错误)
-  - `pnpm run test` (退出码 0，13 个测试套件，120 个测试用例全量通过)
+  - `pnpm run test` (退出码 0，15 个测试套件，129 个测试用例全量通过)
+  - `node -e '...'` (在线模拟登录请求验证 D1 读写正常，返回 302 及 Set-Cookie)
 - **未解决问题**: 无
-- **后续任务**: 系统所有审计发现的安全与性能隐患已全面治理完毕，17 个 Tasks 均已全部标记为 DONE，系统处于极佳的高性能、高安全生产就绪状态。
+- **后续任务**: 用户无需添加任何参数，在本地直接运行 `bash scripts/deploy-pages.sh` 或 `pnpm run deploy:pages` 即可享受秒级极速部署体验。

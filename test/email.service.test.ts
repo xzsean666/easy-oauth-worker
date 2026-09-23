@@ -159,6 +159,31 @@ describe('SMTP Client and Socket Protocol', () => {
     expect(receivedCommands).toContain('QUIT');
   });
 
+  it('properly extracts mailbox addresses from RFC 5322 display names for MAIL FROM and RCPT TO', async () => {
+    const { connector, receivedCommands } = createMockSmtpServer();
+
+    const result = await sendSmtpEmail(
+      {
+        host: 'smtp.gmail.com',
+        port: 465,
+        username: 'sender@gmail.com',
+        password: 'app-password-1234',
+        from: 'EasyOAuth Service <sender@gmail.com>',
+      },
+      {
+        to: 'Recipient User <recipient@example.com>',
+        subject: 'RFC Test',
+        text: 'Hello RFC',
+        html: '<p>Hello RFC</p>',
+      },
+      connector
+    );
+
+    expect(result.success).toBe(true);
+    expect(receivedCommands).toContain('MAIL FROM:<sender@gmail.com>');
+    expect(receivedCommands).toContain('RCPT TO:<recipient@example.com>');
+  });
+
   it('handles authentication failure (e.g. invalid Gmail App Password)', async () => {
     const { connector } = createMockSmtpServer({ failAuth: true });
 
