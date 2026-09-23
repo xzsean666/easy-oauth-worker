@@ -1,0 +1,16 @@
+name = "easy-oauth-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+AUTH_URL = "http://localhost:8787"
+SITE_NAME = "easy-oauth-worker"
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = "465"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "easy-oauth-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
