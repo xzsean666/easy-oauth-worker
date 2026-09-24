@@ -59,8 +59,8 @@ describe('Database Cleanup Task', () => {
 
     const now = Math.floor(Date.now() / 1000);
     // Insert user first to satisfy foreign key constraint
-    await db.prepare('INSERT INTO users (id, email, password_hash, password_salt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind('usr_1', 'user1@example.com', 'hash', 'salt', now, now)
+    await db.prepare('INSERT INTO users (id, username, password_hash, password_salt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('usr_1', 'user1', 'hash', 'salt', now, now)
       .run();
 
     // Insert an expired session and a valid session

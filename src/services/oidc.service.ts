@@ -53,9 +53,9 @@ export function getOpenIdConfiguration(issuer: string): OpenIdConfiguration {
     response_types_supported: ['code'],
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: ['RS256'],
-    scopes_supported: ['openid', 'profile', 'email'],
+    scopes_supported: ['openid', 'profile'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
-    claims_supported: ['sub', 'iss', 'aud', 'exp', 'iat', 'auth_time', 'email', 'email_verified'],
+    claims_supported: ['sub', 'iss', 'aud', 'exp', 'iat', 'auth_time', 'preferred_username'],
     code_challenge_methods_supported: ['S256'],
   };
 }
@@ -149,11 +149,7 @@ export async function generateIdToken(
     claims.nonce = params.nonce;
   }
 
-  const requestedScopes = params.scope.split(' ');
-  if (requestedScopes.includes('email')) {
-    claims.email = params.user.email;
-    claims.email_verified = params.user.email_verified === 1;
-  }
+  claims.preferred_username = params.user.username;
 
   return signJwt(claims, keyInfo.privateKey, keyInfo.kid);
 }
@@ -167,14 +163,10 @@ export function getUserInfoClaims(
 ): Record<string, unknown> {
   const claims: Record<string, unknown> = {
     sub: user.id,
+    preferred_username: user.username,
   };
 
   const requestedScopes = scope.split(' ');
-
-  if (requestedScopes.includes('email')) {
-    claims.email = user.email;
-    claims.email_verified = user.email_verified === 1;
-  }
 
   if (requestedScopes.includes('profile')) {
     claims.updated_at = user.updated_at;

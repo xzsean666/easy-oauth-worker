@@ -1,48 +1,54 @@
 import { queryFirst, execute } from '../db/client';
-import type { User, VerificationToken } from '../db/schema';
+import type { User, VerificationTokenType } from '../db/schema';
 import { hashPassword, verifyPassword } from '../crypto/password';
 import { generateId, generateRandomToken } from '../crypto/token';
+import { verifyTotp } from '../crypto/totp';
 import { createSession, revokeAllUserSessions } from './session.service';
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9_-]{3,32}$/;
+
 export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 128;
-const VERIFY_EMAIL_DURATION_SECONDS = 24 * 3600; // 24 hours
-const RESET_PASSWORD_DURATION_SECONDS = 3600; // 1 hour
 
-export function isValidEmail(email: string): boolean {
-  return EMAIL_REGEX.test(email.trim().toLowerCase());
+export function isValidUsername(username: string): boolean {
+  return USERNAME_REGEX.test(username.trim());
+}
+
+export interface RegisterOptions {
+  isAdmin?: boolean;
 }
 
 /**
- * Registers a new user and generates an email verification token.
+ * Registers a new user with a unique username and password.
  */
 export async function registerUser(
   db: D1Database,
-  email: string,
+  username: string,
   password: string,
-  options?: { isAdmin?: boolean }
-): Promise<{ user: User; verificationToken: string }> {
-  const normalizedEmail = email.trim().toLowerCase();
+  options?: RegisterOptions
+): Promise<{ user: User }> {
+  const trimmedUsername = username.trim();
 
-  if (!isValidEmail(normalizedEmail)) {
-    throw new Error('Invalid email address format');
+  if (!isValidUsername(trimmedUsername)) {
+    throw new Error('Username must be 3-32 characters long and contain only letters, numbers, underscores, or hyphens');
   }
 
+  // Check username uniqueness (case-insensitive)
+  const existingUsername = await queryFirst<User>(
+    db,
+    'SELECT id FROM users WHERE LOWER(username) = ?',
+    trimmedUsername.toLowerCase()
+  );
+  if (existingUsername) {
+    throw new Error('Username is already taken');
+  }
+
+  // Password validation
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
   }
   if (password.length > MAX_PASSWORD_LENGTH) {
     throw new Error(`Password cannot exceed ${MAX_PASSWORD_LENGTH} characters`);
-  }
-
-  const existing = await queryFirst<User>(
-    db,
-    'SELECT id FROM users WHERE email = ?',
-    normalizedEmail
-  );
-  if (existing) {
-    throw new Error('Email is already registered');
   }
 
   const userId = generateId('usr');
@@ -52,10 +58,10 @@ export async function registerUser(
 
   await execute(
     db,
-    `INSERT INTO users (id, email, password_hash, password_salt, email_verified, is_active, is_admin, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?)`,
+    `INSERT INTO users (id, username, password_hash, password_salt, is_active, is_admin, totp_enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 1, ?, 0, ?, ?)`,
     userId,
-    normalizedEmail,
+    trimmedUsername,
     hash,
     salt,
     isAdmin,
@@ -63,47 +69,47 @@ export async function registerUser(
     now
   );
 
-  const verificationToken = await createVerificationToken(
-    db,
-    userId,
-    'verify_email',
-    VERIFY_EMAIL_DURATION_SECONDS
-  );
-
   const user: User = {
     id: userId,
-    email: normalizedEmail,
+    username: trimmedUsername,
     password_hash: hash,
     password_salt: salt,
-    email_verified: 0,
     is_active: 1,
     is_admin: isAdmin,
+    totp_enabled: 0,
     created_at: now,
     updated_at: now,
   };
 
-  return { user, verificationToken };
+  return { user };
+}
+
+export interface LoginResult {
+  user: User;
+  session?: Awaited<ReturnType<typeof createSession>> | null;
+  requires2fa: boolean;
 }
 
 /**
- * Authenticates a user with email and password and creates a session.
+ * Authenticates a user with username and password.
+ * If user has TOTP 2FA enabled, requires2fa will be true and session will be null.
  */
 export async function loginWithPassword(
   db: D1Database,
-  email: string,
+  username: string,
   password: string,
   userAgent: string | null = null
-): Promise<{ user: User; session: Awaited<ReturnType<typeof createSession>> }> {
-  const normalizedEmail = email.trim().toLowerCase();
+): Promise<LoginResult> {
+  const trimmed = username.trim().toLowerCase();
 
   const user = await queryFirst<User>(
     db,
-    'SELECT * FROM users WHERE email = ?',
-    normalizedEmail
+    'SELECT * FROM users WHERE LOWER(username) = ?',
+    trimmed
   );
 
   if (!user) {
-    throw new Error('Invalid email or password');
+    throw new Error('Invalid username or password');
   }
 
   if (user.is_active !== 1) {
@@ -117,7 +123,44 @@ export async function loginWithPassword(
   );
 
   if (!isPasswordValid) {
-    throw new Error('Invalid email or password');
+    throw new Error('Invalid username or password');
+  }
+
+  if (user.totp_enabled === 1 && user.totp_secret) {
+    // 2FA required
+    return { user, session: null, requires2fa: true };
+  }
+
+  const session = await createSession(db, user.id, userAgent);
+  return { user, session, requires2fa: false };
+}
+
+/**
+ * Verifies a 6-digit TOTP code during 2FA login and creates a full session.
+ */
+export async function verifyLogin2fa(
+  db: D1Database,
+  userId: string,
+  totpCode: string,
+  userAgent: string | null = null
+): Promise<{ user: User; session: Awaited<ReturnType<typeof createSession>> }> {
+  const user = await queryFirst<User>(
+    db,
+    'SELECT * FROM users WHERE id = ?',
+    userId
+  );
+
+  if (!user || user.is_active !== 1) {
+    throw new Error('User not found or deactivated');
+  }
+
+  if (user.totp_enabled !== 1 || !user.totp_secret) {
+    throw new Error('Two-factor authentication is not enabled for this user');
+  }
+
+  const valid = await verifyTotp(user.totp_secret, totpCode);
+  if (!valid) {
+    throw new Error('Invalid or expired authentication code');
   }
 
   const session = await createSession(db, user.id, userAgent);
@@ -125,12 +168,137 @@ export async function loginWithPassword(
 }
 
 /**
- * Creates a verification or password reset token.
+ * Activates TOTP two-factor authentication for a user after confirming with a valid code.
+ */
+export async function enableTotp(
+  db: D1Database,
+  userId: string,
+  secret: string,
+  code: string
+): Promise<User> {
+  const valid = await verifyTotp(secret, code);
+  if (!valid) {
+    throw new Error('Invalid verification code. Make sure the code in your authenticator app matches.');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await execute(
+    db,
+    'UPDATE users SET totp_secret = ?, totp_enabled = 1, updated_at = ? WHERE id = ?',
+    secret,
+    now,
+    userId
+  );
+
+  const updated = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', userId);
+  return updated!;
+}
+
+/**
+ * Disables TOTP two-factor authentication for a user after verifying current password.
+ */
+export async function disableTotp(
+  db: D1Database,
+  userId: string,
+  currentPassword: string
+): Promise<User> {
+  const user = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const isPasswordValid = await verifyPassword(
+    currentPassword,
+    user.password_hash,
+    user.password_salt
+  );
+  if (!isPasswordValid) {
+    throw new Error('Incorrect current password. Two-factor authentication remains active.');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  await execute(
+    db,
+    'UPDATE users SET totp_secret = NULL, totp_enabled = 0, updated_at = ? WHERE id = ?',
+    now,
+    userId
+  );
+
+  const updated = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', userId);
+  return updated!;
+}
+
+/**
+ * Resets a user's password using their Google Authenticator (TOTP) code.
+ * Explicitly rejects if the account does not have TOTP enabled.
+ */
+export async function resetPasswordWithTotp(
+  db: D1Database,
+  username: string,
+  totpCode: string,
+  newPassword: string
+): Promise<User> {
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+  }
+  if (newPassword.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password cannot exceed ${MAX_PASSWORD_LENGTH} characters`);
+  }
+
+  const trimmed = username.trim().toLowerCase();
+  const user = await queryFirst<User>(
+    db,
+    'SELECT * FROM users WHERE LOWER(username) = ?',
+    trimmed
+  );
+
+  if (!user || user.is_active !== 1) {
+    throw new Error('Invalid recovery credentials');
+  }
+
+  // Explicit policy requirement: without TOTP, user CANNOT recover password self-service
+  if (user.totp_enabled !== 1 || !user.totp_secret) {
+    throw new Error(
+      'This account does not have Google Authenticator enabled. Password cannot be recovered self-service. Please contact the administrator for assistance.'
+    );
+  }
+
+  const valid = await verifyTotp(user.totp_secret, totpCode);
+  if (!valid) {
+    throw new Error('Invalid or expired Google Authenticator code');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const { hash, salt } = await hashPassword(newPassword);
+
+  await execute(
+    db,
+    'UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?',
+    hash,
+    salt,
+    now,
+    user.id
+  );
+
+  // Revoke all active sessions and OAuth tokens for security
+  await revokeAllUserSessions(db, user.id);
+  await execute(
+    db,
+    'UPDATE oauth_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0',
+    user.id
+  );
+
+  const updated = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', user.id);
+  return updated!;
+}
+
+/**
+ * Creates a verification token (e.g. for login_2fa ticket).
  */
 export async function createVerificationToken(
   db: D1Database,
   userId: string,
-  type: 'verify_email' | 'reset_password',
+  type: VerificationTokenType,
   durationSeconds: number
 ): Promise<string> {
   const token = generateRandomToken(32);
@@ -149,155 +317,6 @@ export async function createVerificationToken(
   );
 
   return token;
-}
-
-/**
- * Verifies an email verification token and marks user's email as verified.
- */
-export async function verifyEmailToken(
-  db: D1Database,
-  token: string
-): Promise<User> {
-  const now = Math.floor(Date.now() / 1000);
-
-  const tokenRecord = await queryFirst<VerificationToken>(
-    db,
-    'SELECT * FROM verification_tokens WHERE token = ? AND type = ?',
-    token,
-    'verify_email'
-  );
-
-  if (!tokenRecord || tokenRecord.used === 1) {
-    throw new Error('Invalid or already used verification link');
-  }
-
-  if (tokenRecord.expires_at <= now) {
-    throw new Error('Verification link has expired');
-  }
-
-  await execute(
-    db,
-    'UPDATE verification_tokens SET used = 1 WHERE token = ?',
-    token
-  );
-
-  await execute(
-    db,
-    'UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?',
-    now,
-    tokenRecord.user_id
-  );
-
-  const updatedUser = await queryFirst<User>(
-    db,
-    'SELECT * FROM users WHERE id = ?',
-    tokenRecord.user_id
-  );
-
-  if (!updatedUser) {
-    throw new Error('User not found');
-  }
-
-  return updatedUser;
-}
-
-/**
- * Creates a password reset token for an email address.
- */
-export async function createPasswordResetToken(
-  db: D1Database,
-  email: string
-): Promise<{ token: string; user: User } | null> {
-  const normalizedEmail = email.trim().toLowerCase();
-
-  const user = await queryFirst<User>(
-    db,
-    'SELECT * FROM users WHERE email = ?',
-    normalizedEmail
-  );
-
-  if (!user || user.is_active !== 1) {
-    return null;
-  }
-
-  const token = await createVerificationToken(
-    db,
-    user.id,
-    'reset_password',
-    RESET_PASSWORD_DURATION_SECONDS
-  );
-
-  return { token, user };
-}
-
-/**
- * Resets a user's password using a valid reset token.
- */
-export async function resetPasswordWithToken(
-  db: D1Database,
-  token: string,
-  newPassword: string
-): Promise<User> {
-  if (newPassword.length < MIN_PASSWORD_LENGTH) {
-    throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
-  }
-  if (newPassword.length > MAX_PASSWORD_LENGTH) {
-    throw new Error(`Password cannot exceed ${MAX_PASSWORD_LENGTH} characters`);
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-
-  const tokenRecord = await queryFirst<VerificationToken>(
-    db,
-    'SELECT * FROM verification_tokens WHERE token = ? AND type = ?',
-    token,
-    'reset_password'
-  );
-
-  if (!tokenRecord || tokenRecord.used === 1) {
-    throw new Error('Invalid or already used password reset link');
-  }
-
-  if (tokenRecord.expires_at <= now) {
-    throw new Error('Password reset link has expired');
-  }
-
-  const { hash, salt } = await hashPassword(newPassword);
-
-  await execute(
-    db,
-    'UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?',
-    hash,
-    salt,
-    now,
-    tokenRecord.user_id
-  );
-
-  await execute(
-    db,
-    'UPDATE verification_tokens SET used = 1 WHERE token = ?',
-    token
-  );
-
-  // Revoke all existing sessions and active OAuth tokens for security
-  await revokeAllUserSessions(db, tokenRecord.user_id);
-  await execute(
-    db,
-    'UPDATE oauth_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0',
-    tokenRecord.user_id
-  );
-
-  const updatedUser = await queryFirst<User>(
-    db,
-    'SELECT * FROM users WHERE id = ?',
-    tokenRecord.user_id
-  );
-
-  if (!updatedUser) {
-    throw new Error('User not found');
-  }
-
-  return updatedUser;
 }
 
 /**

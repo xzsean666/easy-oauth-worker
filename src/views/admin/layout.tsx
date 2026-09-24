@@ -3,14 +3,14 @@ import type { PropsWithChildren } from 'hono/jsx';
 interface AdminLayoutProps {
   title: string;
   currentPath: string;
-  adminEmail?: string;
+  adminUsername?: string;
   siteName?: string;
 }
 
 export const AdminLayout = ({
   title,
   currentPath,
-  adminEmail,
+  adminUsername,
   siteName = 'EasyOAuth Admin',
   children,
 }: PropsWithChildren<AdminLayoutProps>) => {
@@ -67,9 +67,9 @@ export const AdminLayout = ({
           </div>
 
           <div class="pt-6 border-t border-slate-800/80 space-y-3">
-            {adminEmail && (
+            {adminUsername && (
               <div class="text-xs text-slate-400 truncate">
-                Admin: <span class="font-medium text-slate-200">{adminEmail}</span>
+                Admin: <span class="font-medium text-slate-200">{adminUsername}</span>
               </div>
             )}
             <div class="flex items-center justify-between text-xs text-slate-400">

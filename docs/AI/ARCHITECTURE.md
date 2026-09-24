@@ -5,12 +5,14 @@
 - **运行时 (Runtime)**: Cloudflare Workers (兼容 Cloudflare Workers / Workerd 规范)
 - **Web 框架 (Web Framework)**: [Hono](https://hono.dev) - 轻量高效、针对 Workers 深度优化，内建 Cookie、中间件以及 JSX 服务端渲染支持
 - **数据库 (Database)**: Cloudflare D1 (基于 SQLite 的分布式原生数据库)
-- **密码学 (Cryptography)**: 原生 Web Crypto API (`crypto.subtle`)
+- **密码学与认证 (Cryptography & Auth)**: 原生 Web Crypto API (`crypto.subtle`)
   - 密码哈希: PBKDF2-SHA256 (带高迭代次数与独立随机盐)
+  - 二步验证 (2FA): RFC 6238 TOTP (基于 Web Crypto HMAC-SHA1 实现)
+  - 二维码渲染: 纯 TypeScript 算法在服务端内嵌生成 SVG (`src/crypto/qr.ts`)，无任何外部 CDN 依赖
   - PKCE: SHA-256 哈希与 base64url 校验
   - OIDC 签名: RS256 (RSA-SHA256) 密钥对生成、JWT 签名与 JWKS 导出
-  - 随机凭据: `crypto.getRandomValues` 生成高熵安全 Token (Session ID, Auth Code, Reset Token 等)
-- **邮件通信 (SMTP)**: 基于 Cloudflare Workers Outbound TCP Sockets (`cloudflare:sockets`) 直连 Gmail SMTP (`smtp.gmail.com:465` TLS 或 `587` STARTTLS)
+  - 随机凭据: `crypto.getRandomValues` 生成高熵安全 Token (Session ID, Auth Code 等)
+- **用户体系与找回机制**: 纯用户名模型（Zero-Email, Zero-SMS, 100% 离线零费用），通过绑定的 Google Authenticator 动态验证码提供 2FA 与自助找回密码
 - **用户界面 (Web UI)**: Hono JSX + Tailwind CSS，纯服务端生成现代响应式 HTML，无复杂前端构建开销，开箱即用
 - **测试框架 (Testing)**: Vitest (单元测试与逻辑集成测试)
 
@@ -23,28 +25,31 @@ src/
 ├── index.ts               # Worker 入口，应用装配与根路由调度
 ├── types/                 # 全局类型定义与环境变量绑定 (Env, D1Database, Secrets)
 ├── db/                    # 数据库交互层
-│   ├── schema.ts          # 数据库表结构定义
+│   ├── schema.ts          # 数据库表结构定义 (纯 username + TOTP)
 │   └── client.ts          # D1 辅助方法与查询构建
 ├── crypto/                # 密码学与安全核心
 │   ├── password.ts        # PBKDF2 密码哈希与比对
+│   ├── totp.ts            # RFC 6238 TOTP 秘钥生成、验证与 URI 构造
+│   ├── qr.ts              # 纯 TypeScript 内建 SVG 二维码生成
 │   ├── token.ts           # 安全随机 Token 生成
 │   ├── pkce.ts            # PKCE code_challenge / code_verifier 校验
 │   └── jwt.ts             # JWT (ID Token / Access Token) 生成、签名与 JWKS
 ├── services/              # 核心业务服务层
-│   ├── auth.service.ts    # 用户注册、登录、密码重置、邮箱验证
+│   ├── auth.service.ts    # 用户注册、登录、密码重置 (TOTP)
 │   ├── session.service.ts # 会话创建、验证、销毁与 Revoke
 │   ├── oauth.service.ts   # OAuth 客户端、授权码生成/消费、Token 颁发
-│   ├── oidc.service.ts    # OpenID Connect Discovery 与 Claims 处理
-│   ├── user.service.ts    # 用户管理、状态变更
-│   └── email.service.ts   # Gmail SMTP 协议客户端与模板渲染
+│   ├── oidc.service.ts    # OpenID Connect Discovery 与 Claims 处理 (preferred_username)
+│   ├── admin.service.ts   # 用户管理、状态变更
+│   └── security.service.ts# 用户个人安全中心 (2FA 绑定/解绑)
 ├── routes/                # HTTP 协议与 API 路由
-│   ├── auth.ts            # /login, /register, /logout 等认证 API & 表单动作
+│   ├── auth.ts            # /login, /register, /logout, /forgot-password, /account/security
 │   ├── oauth.ts           # /oauth/authorize, /oauth/token, /oauth/revoke
 │   ├── oidc.ts            # /.well-known/*, /oauth/userinfo
-│   └── admin.ts           # /admin/* 运营控制台 API
+│   └── admin-api.ts       # /api/admin/* 运营控制台 API
 ├── views/                 # 页面渲染层 (Hono JSX)
 │   ├── layout.tsx         # 通用 HTML 骨架与 Tailwind CSS 样式
-│   ├── auth/              # 登录、注册、找回密码、邮箱验证视图
+│   ├── auth/              # 登录、注册、TOTP 2FA 登录、找回密码视图
+│   ├── account/           # 个人安全中心视图 (QR 绑定与开关)
 │   ├── oauth/             # Consent 授权确认页视图
 │   └── admin/             # 管理控制台仪表盘与管理面板视图
 └── utils/                 # 工具函数 (Cookie, HTTP 响应封装, 校验)
@@ -57,10 +62,11 @@ src/
 ```text
 users (用户表)
 ├── id: TEXT PRIMARY KEY
-├── email: TEXT UNIQUE NOT NULL
+├── username: TEXT UNIQUE NOT NULL
 ├── password_hash: TEXT NOT NULL
 ├── password_salt: TEXT NOT NULL
-├── email_verified: INTEGER NOT NULL DEFAULT 0
+├── totp_secret: TEXT (Base32 格式，未开启为 NULL)
+├── totp_enabled: INTEGER NOT NULL DEFAULT 0
 ├── is_active: INTEGER NOT NULL DEFAULT 1
 ├── is_admin: INTEGER NOT NULL DEFAULT 0
 ├── created_at: INTEGER NOT NULL
@@ -104,14 +110,6 @@ oauth_tokens (访问与刷新令牌表)
 ├── scope: TEXT NOT NULL
 ├── expires_at: INTEGER NOT NULL
 ├── revoked: INTEGER NOT NULL DEFAULT 0
-└── created_at: INTEGER NOT NULL
-
-verification_tokens (邮箱验证与密码重置临时凭证表)
-├── token: TEXT PRIMARY KEY
-├── user_id: TEXT NOT NULL (FK -> users.id)
-├── type: TEXT NOT NULL ('verify_email' | 'reset_password')
-├── expires_at: INTEGER NOT NULL
-├── used: INTEGER NOT NULL DEFAULT 0
 └── created_at: INTEGER NOT NULL
 ```
 

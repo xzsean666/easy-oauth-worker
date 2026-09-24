@@ -3,7 +3,7 @@ import type { OAuthClient } from '../../db/schema';
 
 interface ClientsViewProps {
   clients: OAuthClient[];
-  adminEmail?: string;
+  adminUsername?: string;
   siteName?: string;
   newSecretInfo?: { clientId: string; secret: string };
   message?: string;
@@ -13,7 +13,7 @@ interface ClientsViewProps {
 
 export const ClientsView = ({
   clients,
-  adminEmail,
+  adminUsername,
   siteName,
   newSecretInfo,
   message,
@@ -21,7 +21,7 @@ export const ClientsView = ({
   csrfToken,
 }: ClientsViewProps) => {
   return (
-    <AdminLayout title="OAuth 2.0 Clients" currentPath="/admin/clients" adminEmail={adminEmail} siteName={siteName}>
+    <AdminLayout title="OAuth 2.0 Clients" currentPath="/admin/clients" adminUsername={adminUsername} siteName={siteName}>
       {newSecretInfo && (
         <div class="bg-amber-500/10 border-2 border-amber-500/40 rounded-xl p-5 space-y-2">
           <div class="flex items-center space-x-2 text-amber-400 font-semibold text-sm">
@@ -84,7 +84,7 @@ export const ClientsView = ({
               id="allowed_scopes"
               name="allowed_scopes"
               type="text"
-              value="openid email profile"
+              value="openid profile"
               class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>

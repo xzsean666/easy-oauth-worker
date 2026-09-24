@@ -34,7 +34,7 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
       clientSecret,
       'Enterprise Portal',
       JSON.stringify([redirectUri]),
-      JSON.stringify(['openid', 'email', 'profile']),
+      JSON.stringify(['openid', 'profile']),
       now,
       now
     );
@@ -53,7 +53,7 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
       response_type: 'code',
       client_id: clientId,
       redirect_uri: redirectUri,
-      scope: 'openid email profile',
+      scope: 'openid profile',
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
       state: clientState,
@@ -75,12 +75,12 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
     // -------------------------------------------------------------
     // Phase 2: User registration & login on EasyOAuth
     // -------------------------------------------------------------
-    const userEmail = 'alice.engineer@mycompany.com';
+    const userName = 'alice_engineer';
     const userPassword = 'CorrectBatteryHorse123!';
 
     // Register user
     const registerFormData = new URLSearchParams({
-      email: userEmail,
+      username: userName,
       password: userPassword,
       confirm_password: userPassword,
     });
@@ -94,14 +94,12 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
       },
       mockEnv
     );
-    expect(registerRes.status).toBe(200);
-
-    // Verify user email directly in DB for test flow
-    await execute(db, 'UPDATE users SET email_verified = 1 WHERE email = ?', userEmail.toLowerCase());
+    expect(registerRes.status).toBe(302);
+    expect(registerRes.headers.get('Location')).toBe('/account/security');
 
     // Login user
     const loginFormData = new URLSearchParams({
-      email: userEmail,
+      username: userName,
       password: userPassword,
     });
 
@@ -138,7 +136,7 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
     expect(consentPageRes.status).toBe(200);
     const consentHtml = await consentPageRes.text();
     expect(consentHtml).toContain('Enterprise Portal');
-    expect(consentHtml).toContain(userEmail);
+    expect(consentHtml).toContain(userName);
     expect(consentHtml).toContain('OpenID Connect');
 
     // Extract CSRF token from consent form
@@ -151,7 +149,7 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
       decision: 'allow',
       client_id: clientId,
       redirect_uri: redirectUri,
-      scope: 'openid email profile',
+      scope: 'openid profile',
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
       state: clientState,
@@ -241,15 +239,13 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
       iss: string;
       sub: string;
       aud: string;
-      email: string;
-      email_verified: boolean;
+      preferred_username: string;
       nonce?: string;
     }>(tokenData.id_token, publicKey);
 
     expect(verifiedIdTokenClaims.iss).toBe('https://auth.mycompany.com');
     expect(verifiedIdTokenClaims.aud).toBe(clientId);
-    expect(verifiedIdTokenClaims.email).toBe(userEmail);
-    expect(verifiedIdTokenClaims.email_verified).toBe(true);
+    expect(verifiedIdTokenClaims.preferred_username).toBe(userName);
 
     // -------------------------------------------------------------
     // Phase 6: Consumer App accesses UserInfo endpoint with Access Token
@@ -265,13 +261,13 @@ describe('End-to-End (E2E) OAuth 2.0 PKCE + OIDC Provider Integration', () => {
     expect(userinfoRes.status).toBe(200);
     const userinfo = (await userinfoRes.json()) as {
       sub: string;
-      email: string;
-      email_verified: boolean;
+      preferred_username: string;
+      updated_at?: number;
     };
 
     expect(userinfo.sub).toBe(verifiedIdTokenClaims.sub);
-    expect(userinfo.email).toBe(userEmail);
-    expect(userinfo.email_verified).toBe(true);
+    expect(userinfo.preferred_username).toBe(userName);
+    expect((userinfo as any).email).toBeUndefined();
 
     // -------------------------------------------------------------
     // Phase 7: Refresh Access Token using Refresh Token

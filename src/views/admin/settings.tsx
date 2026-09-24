@@ -1,26 +1,18 @@
 import { AdminLayout } from './layout';
 
 interface SettingsViewProps {
-  adminEmail?: string;
+  adminUsername?: string;
   siteName?: string;
   authUrl: string;
-  smtpHost?: string;
-  smtpPort?: string;
-  smtpUsername?: string;
 }
 
 export const SettingsView = ({
-  adminEmail,
+  adminUsername,
   siteName,
   authUrl,
-  smtpHost,
-  smtpPort,
-  smtpUsername,
 }: SettingsViewProps) => {
-  const isSmtpConfigured = Boolean(smtpUsername);
-
   return (
-    <AdminLayout title="System Settings" currentPath="/admin/settings" adminEmail={adminEmail} siteName={siteName}>
+    <AdminLayout title="System Settings" currentPath="/admin/settings" adminUsername={adminUsername} siteName={siteName}>
       <div class="space-y-6">
         {/* Provider Endpoints & Identity */}
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
@@ -60,40 +52,34 @@ export const SettingsView = ({
           </div>
         </div>
 
-        {/* Email & SMTP Status */}
+        {/* 2FA & Offline Zero-Cost Security */}
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
           <div class="flex items-center justify-between">
-            <h2 class="text-base font-semibold text-white">Gmail SMTP Gateway</h2>
-            {isSmtpConfigured ? (
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                ✓ Configured
-              </span>
-            ) : (
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                ⚠ Missing Credentials
-              </span>
-            )}
+            <h2 class="text-base font-semibold text-white">Authentication & Recovery Architecture</h2>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              ✓ Pure Username & Zero-Cost TOTP
+            </span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div class="space-y-1">
-              <span class="text-slate-400">SMTP Host</span>
+              <span class="text-slate-400">Identity Mode</span>
               <div class="font-mono text-white bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                {smtpHost || 'smtp.gmail.com'}
+                Pure Username & TOTP (100% Offline)
               </div>
             </div>
 
             <div class="space-y-1">
-              <span class="text-slate-400">SMTP Port</span>
+              <span class="text-slate-400">2FA / MFA Standard</span>
               <div class="font-mono text-white bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                {smtpPort || '465'} (SSL/TLS)
+                RFC 6238 TOTP (Google Authenticator)
               </div>
             </div>
 
             <div class="space-y-1">
-              <span class="text-slate-400">SMTP Account</span>
+              <span class="text-slate-400">Password Recovery</span>
               <div class="font-mono text-white bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                {smtpUsername ? `${smtpUsername.substring(0, 3)}***@gmail.com` : 'Not Set'}
+                Self-service via TOTP Verification
               </div>
             </div>
           </div>

@@ -137,7 +137,7 @@ describe('RS256 JWT Signing, Verification and JWKS', () => {
       iss: 'https://auth.example.com',
       sub: 'usr_abc123',
       aud: 'client_xyz',
-      email: 'user@example.com',
+      preferred_username: 'crypto_user',
       iat: now,
       exp: now + 3600,
     };
@@ -156,7 +156,7 @@ describe('RS256 JWT Signing, Verification and JWKS', () => {
     const importedPub = await importPublicKey(publicJwk);
     const verifiedPayload = await verifyJwt(token, importedPub);
     expect(verifiedPayload.sub).toBe('usr_abc123');
-    expect(verifiedPayload.email).toBe('user@example.com');
+    expect(verifiedPayload.preferred_username).toBe('crypto_user');
   });
 
   it('rejects tampered JWT signature', async () => {

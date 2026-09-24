@@ -7,7 +7,7 @@
 # 2. Quality gate verification (TypeScript typecheck & Vitest test suite)
 # 3. D1 database migration & optional seeding
 # 4. Cloudflare Pages project initialization with nodejs_compat
-# 5. Secrets synchronization (SESSION_SECRET, OIDC_SIGNING_KEY, Gmail SMTP)
+# 5. Secrets synchronization (SESSION_SECRET, OIDC_SIGNING_KEY)
 # 6. Fullstack deployment of public assets & Pages Functions
 # ==============================================================================
 
@@ -50,6 +50,7 @@ DB_ID=""
 PUBLIC_DIR="public"
 SKIP_TESTS=true
 SKIP_MIGRATE=true
+RESET_DB=false
 SEED_DATA=false
 NON_INTERACTIVE=true
 FAST_MODE=true
@@ -69,12 +70,13 @@ Options:
   -f, --fast                 Fast deploy mode (default behavior)
   -t, --test                 Run TypeScript typecheck and Vitest test suite before deploy
   -m, --migrate              Run remote D1 database migrations before deploy
+  -r, --reset-db             Reset remote D1 database (drops legacy tables and applies clean schema)
   --full                     Full verification mode (runs tests, migrations, and interactive checks)
   -p, --project-name <name>  Cloudflare Pages project name (default: easy-oauth-worker)
   -b, --branch <branch>      Production or target git branch (default: main)
   -d, --db-name <name>       Cloudflare D1 database name (default: easy-oauth-db)
   -i, --db-id <uuid>         Cloudflare D1 database UUID (overrides auto-detection)
-  --seed                     Execute seed.sql on remote D1 after migration
+  --seed                     Execute seed.sql on remote D1 after migration / reset
   --skip-tests               Skip running TypeScript typecheck and Vitest tests (default)
   --skip-migrate             Skip remote D1 database migration (default)
   --interactive              Enable interactive confirmation prompts
@@ -90,6 +92,9 @@ Environment Requirements:
 Examples:
   # Instant deployment (Default fast mode, takes 2~3 seconds)
   bash scripts/deploy-pages.sh
+
+  # Reset remote D1 to clean pure username schema and seed initial admin
+  bash scripts/deploy-pages.sh --reset-db --seed
 
   # Full verification deployment with test suite and remote migrations
   bash scripts/deploy-pages.sh --full
@@ -118,6 +123,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -m|--migrate)
+      SKIP_MIGRATE=false
+      FAST_MODE=false
+      shift
+      ;;
+    -r|--reset-db)
+      RESET_DB=true
       SKIP_MIGRATE=false
       FAST_MODE=false
       shift
@@ -311,12 +322,56 @@ else
     fi
   fi
 
-  # Step 3b: Apply Migrations
-  log_info "Applying schema migrations to remote D1 database '${DB_NAME}'..."
-  if echo "y" | npx wrangler d1 migrations apply "$DB_NAME" --remote 2>/dev/null; then
-    log_success "Remote D1 schema migrations applied successfully."
+  # Step 3b: Apply Migrations or Reset Database
+  if [ "$RESET_DB" = true ]; then
+    log_warn "=========================================================================="
+    log_warn "  [重置数据库] 正在清理远端 D1 数据库并重建纯净 Schema (无邮箱 / 纯用户名)..."
+    log_warn "=========================================================================="
+
+    DROP_SQL="DROP TABLE IF EXISTS verification_tokens; DROP TABLE IF EXISTS oauth_tokens; DROP TABLE IF EXISTS oauth_authorization_codes; DROP TABLE IF EXISTS oauth_clients; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
+
+    log_info "Dropping legacy tables on remote D1 '${DB_NAME}'..."
+    echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --command="$DROP_SQL" 2>/dev/null || true
+
+    log_info "Applying clean initial schema (migrations/0001_initial_schema.sql) to remote D1..."
+    if echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --file=migrations/0001_initial_schema.sql 2>/dev/null; then
+      echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --command="CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP); INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0001_initial_schema.sql');" 2>/dev/null || true
+      log_success "Remote D1 schema has been completely reset to clean pure username architecture!"
+    else
+      log_error "Failed to apply clean initial schema to remote D1 '${DB_NAME}'."
+    fi
   else
-    log_warn "Remote D1 migration execution skipped or failed (check D1 permissions)."
+    # Schema compatibility probe
+    log_info "Probing remote D1 database '${DB_NAME}' schema compatibility..."
+    PROBE_OUT=$(echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --command="PRAGMA table_info(users);" 2>/dev/null || true)
+
+    if echo "$PROBE_OUT" | grep -q "email" && ! echo "$PROBE_OUT" | grep -q "username"; then
+      log_warn "=========================================================================="
+      log_warn "  [Schema 不兼容告警] 检测到远端 D1 仍为旧版邮箱架构 (包含 email 字段，缺少 username)"
+      log_warn "  本项目已重构为纯用户名架构并不向前兼容，继续使用旧表结构会导致线上鉴权异常！"
+      log_warn "  建议使用 --reset-db 参数重置数据库:"
+      log_warn "    bash scripts/deploy-pages.sh --reset-db --seed"
+      log_warn "=========================================================================="
+      if [ "$NON_INTERACTIVE" = false ]; then
+        read -r -p "Would you like to reset remote D1 database to the new clean schema now? [y/N] " PROMPT_RESET
+        if [[ "$PROMPT_RESET" =~ ^[Yy]$ ]]; then
+          DROP_SQL="DROP TABLE IF EXISTS verification_tokens; DROP TABLE IF EXISTS oauth_tokens; DROP TABLE IF EXISTS oauth_authorization_codes; DROP TABLE IF EXISTS oauth_clients; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
+          log_info "Dropping legacy tables on remote D1 '${DB_NAME}'..."
+          echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --command="$DROP_SQL" 2>/dev/null || true
+          log_info "Applying clean initial schema to remote D1..."
+          echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --file=migrations/0001_initial_schema.sql 2>/dev/null || true
+          echo "y" | npx wrangler d1 execute "$DB_NAME" --remote --command="CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP); INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0001_initial_schema.sql');" 2>/dev/null || true
+          log_success "Remote D1 schema reset to clean pure username architecture!"
+        fi
+      fi
+    else
+      log_info "Applying schema migrations to remote D1 database '${DB_NAME}'..."
+      if echo "y" | npx wrangler d1 migrations apply "$DB_NAME" --remote 2>/dev/null; then
+        log_success "Remote D1 schema migrations applied successfully."
+      else
+        log_warn "Remote D1 migration execution skipped or failed (check D1 permissions)."
+      fi
+    fi
   fi
 
   # Step 3c: Seed Data
@@ -398,13 +453,9 @@ fi
 if [ "$SYNC_SECRETS" = true ]; then
   SESSION_SECRET_VAL=$(get_local_secret "SESSION_SECRET")
   OIDC_KEY_VAL=$(get_local_secret "OIDC_SIGNING_KEY")
-  SMTP_PASS_VAL=$(get_local_secret "SMTP_PASSWORD")
-  SMTP_USER_VAL=$(get_local_secret "SMTP_USERNAME")
 
   upload_secret "SESSION_SECRET" "$SESSION_SECRET_VAL"
   upload_secret "OIDC_SIGNING_KEY" "$OIDC_KEY_VAL"
-  upload_secret "SMTP_PASSWORD" "$SMTP_PASS_VAL"
-  upload_secret "SMTP_USERNAME" "$SMTP_USER_VAL"
 fi
 
 # ------------------------------------------------------------------------------
@@ -449,9 +500,6 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 AUTH_URL = "https://${DEPLOYED_DOMAIN}"
 SITE_NAME = "${PROJECT_NAME}"
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = "465"
-SMTP_FROM = "EasyOAuth 认证中心 <cloud.mailer.service@gmail.com>"
 EOF
 
 if [ -n "$DB_ID" ] && [ "$DB_ID" != "00000000-0000-0000-0000-000000000000" ]; then

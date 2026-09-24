@@ -106,7 +106,7 @@ async function main() {
   const loginRes = await fetch('http://127.0.0.1:8787/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'email=admin%40example.com&password=AdminPassword123!',
+    body: 'username=admin&password=AdminPassword123!',
     redirect: 'manual',
   });
 
@@ -134,10 +134,6 @@ async function main() {
   await navigate('http://127.0.0.1:8787/forgot-password');
   await capture('04_forgot_password_desktop.png');
 
-  // --- Screen 5: Reset Password Form ---
-  await navigate('http://127.0.0.1:8787/reset-password?token=demo_valid_token_123');
-  await capture('05_reset_password_desktop.png');
-
   // --- Inject Session Cookie for Authenticated Views ---
   if (sessionToken) {
     await send('Network.setCookie', {
@@ -149,6 +145,10 @@ async function main() {
       secure: false,
     });
   }
+
+  // --- Screen 5: Account Security Center (TOTP 2FA) ---
+  await navigate('http://127.0.0.1:8787/account/security');
+  await capture('05_account_security_desktop.png');
 
   // --- Screen 6: Admin Overview Dashboard ---
   await setViewport(1280, 800, false);
@@ -169,7 +169,7 @@ async function main() {
 
   // --- Screen 10: OAuth 2.0 Consent Screen Desktop ---
   const validConsentUrl =
-    'http://127.0.0.1:8787/oauth/authorize?client_id=web-app-client&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&response_type=code&scope=openid+profile+email&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256';
+    'http://127.0.0.1:8787/oauth/authorize?client_id=web-app-client&redirect_uri=https%3A%2F%2Foauth.pstmn.io%2Fv1%2Fcallback&response_type=code&scope=openid+profile&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256';
   await navigate(validConsentUrl);
   await capture('10_oauth_consent_desktop.png');
 

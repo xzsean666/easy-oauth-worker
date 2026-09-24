@@ -3,15 +3,23 @@ import { Layout } from '../layout';
 interface RegisterViewProps {
   siteName?: string;
   error?: string;
-  email?: string;
+  username?: string;
   returnTo?: string;
 }
 
-export const RegisterView = ({ siteName, error, email, returnTo }: RegisterViewProps) => {
+export const RegisterView = ({
+  siteName = 'EasyOAuth',
+  error,
+  username,
+  returnTo,
+}: RegisterViewProps) => {
   return (
     <Layout title="Sign Up" siteName={siteName}>
       <div>
         <h2 class="text-xl font-bold text-white text-center">Create a new account</h2>
+        <p class="text-xs text-slate-400 text-center mt-1">
+          Fast and secure username registration
+        </p>
       </div>
 
       {error && (
@@ -24,22 +32,24 @@ export const RegisterView = ({ siteName, error, email, returnTo }: RegisterViewP
         {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
 
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1" for="email">
-            Email address
+          <label class="block text-xs font-medium text-slate-300 mb-1" for="username">
+            Username (Letters, numbers, _, -)
           </label>
           <input
-            id="email"
-            name="email"
-            type="email"
+            id="username"
+            name="username"
+            type="text"
             required
-            value={email || ''}
+            pattern="[a-zA-Z0-9_-]{3,32}"
+            title="3-32 characters (letters, numbers, _, -)"
+            value={username || ''}
             class="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
-            placeholder="you@example.com"
+            placeholder="alice_dev"
           />
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1" for="password">
+          <label class="block text-xs font-medium text-slate-300 mb-1" for="password">
             Password (min 8 characters)
           </label>
           <input
@@ -54,7 +64,7 @@ export const RegisterView = ({ siteName, error, email, returnTo }: RegisterViewP
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1" for="confirm_password">
+          <label class="block text-xs font-medium text-slate-300 mb-1" for="confirm_password">
             Confirm Password
           </label>
           <input
@@ -78,7 +88,10 @@ export const RegisterView = ({ siteName, error, email, returnTo }: RegisterViewP
 
       <div class="text-center text-sm text-slate-400 pt-2 border-t border-slate-700/50">
         Already have an account?{' '}
-        <a href={`/login${returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''}`} class="text-indigo-400 hover:text-indigo-300 font-medium">
+        <a
+          href={`/login${returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''}`}
+          class="text-indigo-400 hover:text-indigo-300 font-medium"
+        >
           Sign in
         </a>
       </div>

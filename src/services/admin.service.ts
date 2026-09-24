@@ -5,7 +5,7 @@ import { revokeAllUserSessions } from './session.service';
 
 export interface DashboardStats {
   totalUsers: number;
-  verifiedUsers: number;
+  totpUsers: number;
   activeSessions: number;
   totalClients: number;
 }
@@ -23,9 +23,9 @@ export async function getDashboardStats(db: D1Database): Promise<DashboardStats>
     'SELECT COUNT(*) as count FROM users'
   );
 
-  const verifiedUsersRow = await queryFirst<{ count: number }>(
+  const totpUsersRow = await queryFirst<{ count: number }>(
     db,
-    'SELECT COUNT(*) as count FROM users WHERE email_verified = 1'
+    'SELECT COUNT(*) as count FROM users WHERE totp_enabled = 1'
   );
 
   const activeSessionsRow = await queryFirst<{ count: number }>(
@@ -41,7 +41,7 @@ export async function getDashboardStats(db: D1Database): Promise<DashboardStats>
 
   return {
     totalUsers: totalUsersRow?.count ?? 0,
-    verifiedUsers: verifiedUsersRow?.count ?? 0,
+    totpUsers: totpUsersRow?.count ?? 0,
     activeSessions: activeSessionsRow?.count ?? 0,
     totalClients: totalClientsRow?.count ?? 0,
   };
@@ -60,15 +60,15 @@ export async function listUsers(
 
   let countSql = 'SELECT COUNT(*) as count FROM users';
   let querySql = `
-    SELECT id, email, email_verified, is_active, is_admin, created_at, updated_at
+    SELECT id, username, is_active, is_admin, totp_enabled, created_at, updated_at
     FROM users
   `;
   const params: unknown[] = [];
 
   if (search) {
     const searchPattern = `%${search.toLowerCase()}%`;
-    countSql += ' WHERE LOWER(email) LIKE ?';
-    querySql += ' WHERE LOWER(email) LIKE ?';
+    countSql += ' WHERE LOWER(username) LIKE ?';
+    querySql += ' WHERE LOWER(username) LIKE ?';
     params.push(searchPattern);
   }
 
@@ -84,12 +84,12 @@ export async function listUsers(
 }
 
 /**
- * Updates a user's flags (is_active, email_verified, is_admin).
+ * Updates a user's flags (is_active, is_admin).
  */
 export async function updateUserStatus(
   db: D1Database,
   userId: string,
-  updates: { is_active?: number; email_verified?: number; is_admin?: number },
+  updates: { is_active?: number; is_admin?: number },
   currentAdminId?: string
 ): Promise<SafeUser> {
   const user = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', userId);
@@ -107,15 +107,13 @@ export async function updateUserStatus(
   }
 
   const newIsActive = updates.is_active !== undefined ? updates.is_active : user.is_active;
-  const newEmailVerified = updates.email_verified !== undefined ? updates.email_verified : user.email_verified;
   const newIsAdmin = updates.is_admin !== undefined ? updates.is_admin : user.is_admin;
   const now = Math.floor(Date.now() / 1000);
 
   await execute(
     db,
-    'UPDATE users SET is_active = ?, email_verified = ?, is_admin = ?, updated_at = ? WHERE id = ?',
+    'UPDATE users SET is_active = ?, is_admin = ?, updated_at = ? WHERE id = ?',
     newIsActive,
-    newEmailVerified,
     newIsAdmin,
     now,
     userId
@@ -128,10 +126,11 @@ export async function updateUserStatus(
 
   return {
     id: user.id,
-    email: user.email,
-    email_verified: newEmailVerified,
+    username: user.username,
     is_active: newIsActive,
     is_admin: newIsAdmin,
+    totp_secret: user.totp_secret,
+    totp_enabled: user.totp_enabled ?? 0,
     created_at: user.created_at,
     updated_at: now,
   };
@@ -146,18 +145,27 @@ export async function deleteUser(
   currentAdminId?: string
 ): Promise<boolean> {
   if (currentAdminId && userId === currentAdminId) {
-    throw new Error('You cannot delete your own administrator account');
+    throw new Error('You cannot delete your own account');
   }
 
-  const res = await execute(db, 'DELETE FROM users WHERE id = ?', userId);
-  return (res.meta.changes ?? 0) > 0;
+  const user = await queryFirst<User>(db, 'SELECT id FROM users WHERE id = ?', userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  await revokeAllUserSessions(db, userId);
+  await execute(db, 'DELETE FROM users WHERE id = ?', userId);
+  return true;
 }
 
 /**
- * Lists all registered OAuth clients.
+ * Lists all OAuth clients.
  */
 export async function listClients(db: D1Database): Promise<OAuthClient[]> {
-  return queryAll<OAuthClient>(db, 'SELECT * FROM oauth_clients ORDER BY created_at DESC');
+  return queryAll<OAuthClient>(
+    db,
+    'SELECT * FROM oauth_clients ORDER BY created_at DESC'
+  );
 }
 
 /**
@@ -165,72 +173,49 @@ export async function listClients(db: D1Database): Promise<OAuthClient[]> {
  */
 export async function createClient(
   db: D1Database,
-  data: {
-    name: string;
+  params: {
+    clientName: string;
     redirectUris: string[];
     allowedScopes?: string[];
     isPublic?: boolean;
   }
-): Promise<{ client: OAuthClient; plainSecret: string }> {
-  if (!data.name.trim()) {
-    throw new Error('Client name is required');
-  }
-
-  if (!data.redirectUris || data.redirectUris.length === 0) {
-    throw new Error('At least one redirect URI is required');
-  }
-
+): Promise<{ client: OAuthClient; secret: string }> {
   const clientId = generateId('client');
-  const clientSecret = generateRandomToken(32);
+  const secret = generateRandomToken(32);
   const now = Math.floor(Date.now() / 1000);
-  const scopes = data.allowedScopes && data.allowedScopes.length > 0 ? data.allowedScopes : ['openid', 'email', 'profile'];
-  const isPublic = data.isPublic ? 1 : 0;
+  const scopes = params.allowedScopes && params.allowedScopes.length > 0 ? params.allowedScopes : ['openid', 'profile'];
 
   await execute(
     db,
-    `INSERT INTO oauth_clients (client_id, client_secret, client_name, redirect_uris, allowed_scopes, is_public, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO oauth_clients (
+      client_id, client_secret, client_name, redirect_uris, allowed_scopes, is_public, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     clientId,
-    clientSecret,
-    data.name.trim(),
-    JSON.stringify(data.redirectUris),
+    secret,
+    params.clientName.trim(),
+    JSON.stringify(params.redirectUris),
     JSON.stringify(scopes),
-    isPublic,
+    params.isPublic ? 1 : 0,
     now,
     now
   );
 
-  const client: OAuthClient = {
-    client_id: clientId,
-    client_secret: clientSecret,
-    client_name: data.name.trim(),
-    redirect_uris: JSON.stringify(data.redirectUris),
-    allowed_scopes: JSON.stringify(scopes),
-    is_public: isPublic,
-    created_at: now,
-    updated_at: now,
-  };
-
-  return { client, plainSecret: clientSecret };
-}
-
-/**
- * Rotates an existing OAuth client's secret.
- */
-export async function rotateClientSecret(
-  db: D1Database,
-  clientId: string
-): Promise<{ clientId: string; newSecret: string }> {
   const client = await queryFirst<OAuthClient>(
     db,
     'SELECT * FROM oauth_clients WHERE client_id = ?',
     clientId
   );
 
-  if (!client) {
-    throw new Error('OAuth client not found');
-  }
+  return { client: client!, secret };
+}
 
+/**
+ * Rotates an OAuth client's secret.
+ */
+export async function rotateClientSecret(
+  db: D1Database,
+  clientId: string
+): Promise<{ client: OAuthClient; newSecret: string }> {
   const newSecret = generateRandomToken(32);
   const now = Math.floor(Date.now() / 1000);
 
@@ -242,7 +227,66 @@ export async function rotateClientSecret(
     clientId
   );
 
-  return { clientId, newSecret };
+  const updatedClient = await queryFirst<OAuthClient>(
+    db,
+    'SELECT * FROM oauth_clients WHERE client_id = ?',
+    clientId
+  );
+
+  if (!updatedClient) {
+    throw new Error('OAuth client not found');
+  }
+
+  return { client: updatedClient, newSecret };
+}
+
+/**
+ * Updates an OAuth client's basic configuration.
+ */
+export async function updateClient(
+  db: D1Database,
+  clientId: string,
+  params: {
+    clientName?: string;
+    redirectUris?: string[];
+    allowedScopes?: string[];
+    isPublic?: boolean;
+  }
+): Promise<OAuthClient> {
+  const existing = await queryFirst<OAuthClient>(
+    db,
+    'SELECT * FROM oauth_clients WHERE client_id = ?',
+    clientId
+  );
+  if (!existing) {
+    throw new Error('OAuth client not found');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const clientName = params.clientName ? params.clientName.trim() : existing.client_name;
+  const redirectUris = params.redirectUris ? JSON.stringify(params.redirectUris) : existing.redirect_uris;
+  const allowedScopes = params.allowedScopes ? JSON.stringify(params.allowedScopes) : existing.allowed_scopes;
+  const isPublic = params.isPublic !== undefined ? (params.isPublic ? 1 : 0) : existing.is_public;
+
+  await execute(
+    db,
+    `UPDATE oauth_clients 
+     SET client_name = ?, redirect_uris = ?, allowed_scopes = ?, is_public = ?, updated_at = ? 
+     WHERE client_id = ?`,
+    clientName,
+    redirectUris,
+    allowedScopes,
+    isPublic,
+    now,
+    clientId
+  );
+
+  const updated = await queryFirst<OAuthClient>(
+    db,
+    'SELECT * FROM oauth_clients WHERE client_id = ?',
+    clientId
+  );
+  return updated!;
 }
 
 /**
@@ -252,6 +296,15 @@ export async function deleteClient(
   db: D1Database,
   clientId: string
 ): Promise<boolean> {
-  const res = await execute(db, 'DELETE FROM oauth_clients WHERE client_id = ?', clientId);
-  return (res.meta.changes ?? 0) > 0;
+  const client = await queryFirst<OAuthClient>(
+    db,
+    'SELECT client_id FROM oauth_clients WHERE client_id = ?',
+    clientId
+  );
+  if (!client) {
+    throw new Error('OAuth client not found');
+  }
+
+  await execute(db, 'DELETE FROM oauth_clients WHERE client_id = ?', clientId);
+  return true;
 }

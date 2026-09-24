@@ -13,7 +13,7 @@ describe('E2E Visual Test Screenshots & Documentation', () => {
     '02_login_mobile.png',
     '03_register_desktop.png',
     '04_forgot_password_desktop.png',
-    '05_reset_password_desktop.png',
+    '05_account_security_desktop.png',
     '06_admin_dashboard_desktop.png',
     '07_admin_users_desktop.png',
     '08_admin_clients_desktop.png',

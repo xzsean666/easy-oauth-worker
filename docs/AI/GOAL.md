@@ -11,13 +11,12 @@
 ## 2. 核心功能范围（第一版 V1）
 
 ### 2.1 Authentication (账号与会话)
-- 邮箱注册 (Email Register)
-- 邮箱登录 (Email Login)
-- 邮箱验证链接 (Email Verification)
-- 忘记密码 / 找回密码 (Forgot Password)
-- 重置密码 (Reset Password)
-- 修改密码 (Change Password)
+- 纯用户名注册 (Username Register, 3-32位合规字符)
+- 纯用户名登录 (Username Login)
+- 谷歌身份验证器二次验证 (Google Authenticator RFC 6238 TOTP 2FA)
+- 基于 TOTP 验证码的自助离线找回密码 (Forgot Password via TOTP, 零费用，无邮箱/短信依赖)
 - 用户登出 (Logout)
+- 个人安全中心 (`/account/security`, 自主开启/关闭 TOTP 2FA，内置纯原生 SVG 二维码与 Base32 密钥)
 - 会话生命周期管理 (Secure HttpOnly Session Cookie, Revocation)
 
 ### 2.2 OAuth 2.0 Provider
@@ -30,27 +29,27 @@
 ### 2.3 OpenID Connect (OIDC)
 - OIDC Discovery: `GET /.well-known/openid-configuration`
 - JWKS: `GET /.well-known/jwks.json`
-- ID Token 生成与 WebCrypto 签名 (RS256/ES256)
+- ID Token 生成与 WebCrypto 签名 (RS256)
 - UserInfo 端点: `GET /oauth/userinfo`
-- 标准 Scopes: `openid`, `profile`, `email`
+- 标准 Scopes: `openid`, `profile` (提供 `preferred_username` 标识)
 
 ### 2.4 User Web UI
-- Modern / Clean / Responsive 页面 (Tailwind CSS)
-- `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password`, `/oauth/consent`
+- Modern / Clean / Responsive 页面 (Hono JSX + Tailwind CSS)
+- `/login`, `/login-2fa`, `/register`, `/account/security`, `/forgot-password`, `/oauth/consent`
 
 ### 2.5 Admin Console
 - 管理后台路由 `/admin`
-- Dashboard：用户数、活跃 Session、已验证用户数、客户端数
-- 用户管理：用户搜索与列表、用户详情、手动验证邮箱、启用/停用用户、Revoke Session、删除用户
+- Dashboard：用户数、活跃 Session、2FA 绑定用户数、客户端数
+- 用户管理：用户搜索与列表、重置密码、启用/停用用户、Revoke Session、删除用户
 - Client 管理：创建、查看、编辑、删除 Client，轮换 Client Secret
-- 系统基础设置：站点名称、站点 URL、SMTP 基础配置信息展示
+- 系统基础设置：站点名称、站点 URL、环境信息展示
 
-### 2.6 Email Service
-- 第一版专用 Gmail SMTP
-- 基于 Cloudflare Workers TCP Socket (`connect()`) 建立 TLS / STARTTLS 连接发送认证邮件
+### 2.6 Offline Security Engine
+- 基于 RFC 6238 标准的 TOTP 算法，纯原生 Web Crypto API 实现
+- 纯 TypeScript 算法在服务端内嵌生成 SVG 二维码，100% 离线，无第三方图表 API 依赖
 
 ## 3. 明确不包含的内容 (Out of Scope for V1)
-- MFA / 2FA
+- 邮箱与短信依赖 (不使用任何付费或第三方 SaaS 邮件/SMS 服务)
 - Passkey / WebAuthn
 - 多租户组织 (Organizations / Teams)
 - 复杂 RBAC 权限体系

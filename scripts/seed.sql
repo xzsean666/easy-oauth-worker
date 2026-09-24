@@ -1,26 +1,28 @@
 -- Seed data for easy-oauth-worker
 -- Default Admin Account:
--- Email: admin@example.com
+-- Username: admin
 -- Password: AdminPassword123!
 -- Salt: 4c06ba0c674fc1179b81a5d9563476a4
 -- Hash: ba48967375500121ef019b4ade1df374ff9e45ec1b81ed58ad867b1e0c863835 (PBKDF2-SHA256, 100,000 iterations)
 
 INSERT OR IGNORE INTO users (
     id,
-    email,
+    username,
     password_hash,
     password_salt,
-    email_verified,
+    totp_secret,
+    totp_enabled,
     is_active,
     is_admin,
     created_at,
     updated_at
 ) VALUES (
     'usr_seed_admin_001',
-    'admin@example.com',
+    'admin',
     'ba48967375500121ef019b4ade1df374ff9e45ec1b81ed58ad867b1e0c863835',
     '4c06ba0c674fc1179b81a5d9563476a4',
-    1,
+    NULL,
+    0,
     1,
     1,
     strftime('%s', 'now'),
@@ -44,7 +46,7 @@ INSERT OR IGNORE INTO oauth_clients (
     'secret_web_app_987654321',
     'Demo Web Application (Confidential)',
     '["http://localhost:3000/api/auth/callback/easy-oauth", "https://oauth.pstmn.io/v1/callback"]',
-    '["openid", "email", "profile"]',
+    '["openid", "profile"]',
     0,
     strftime('%s', 'now'),
     strftime('%s', 'now')
@@ -67,7 +69,7 @@ INSERT OR IGNORE INTO oauth_clients (
     '',
     'Demo SPA Application (Public)',
     '["http://localhost:5173/callback", "http://localhost:8080/callback"]',
-    '["openid", "email", "profile"]',
+    '["openid", "profile"]',
     1,
     strftime('%s', 'now'),
     strftime('%s', 'now')

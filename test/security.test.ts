@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import app from '../src/index';
 import { cleanupExpiredData } from '../src/index';
 import { createTestDatabase, MockD1Database } from './helpers/mock-d1';
-import { registerUser, resetPasswordWithToken, changePassword } from '../src/services/auth.service';
+import { registerUser, resetPasswordWithTotp, changePassword } from '../src/services/auth.service';
 import { createSession } from '../src/services/session.service';
 import { updateUserStatus } from '../src/services/admin.service';
-import { sendSmtpEmail } from '../src/services/email.service';
 import { generateCsrfToken, verifyCsrfToken } from '../src/crypto/csrf';
 import { checkRateLimit, resetRateLimit } from '../src/middlewares/rate-limit';
 import { execute, queryFirst } from '../src/db/client';
@@ -27,9 +26,8 @@ describe('TASK-017 Comprehensive Security & Hardening Tests', () => {
       SESSION_SECRET: 'test-secret-salt-12345',
     };
 
-    const { user } = await registerUser(db, 'admin@sec.com', 'AdminPassword123!', { isAdmin: true });
+    const { user } = await registerUser(db, 'admin_sec', 'AdminPassword123!', { isAdmin: true });
     adminId = user.id;
-    await execute(db, 'UPDATE users SET email_verified = 1 WHERE id = ?', adminId);
     const session = await createSession(db, adminId);
     adminSessionId = session.id;
   });
@@ -108,20 +106,20 @@ describe('TASK-017 Comprehensive Security & Hardening Tests', () => {
     it('rejects passwords exceeding 128 characters during registration', async () => {
       const giantPassword = 'A'.repeat(129);
       await expect(
-        registerUser(db, 'giant@example.com', giantPassword)
+        registerUser(db, 'giant_user', giantPassword)
       ).rejects.toThrow('Password cannot exceed 128 characters');
     });
 
     it('accepts passwords up to 128 characters', async () => {
       const maxPassword = 'A'.repeat(128);
-      const { user } = await registerUser(db, 'maxpass@example.com', maxPassword);
+      const { user } = await registerUser(db, 'maxpass_user', maxPassword);
       expect(user.id).toBeDefined();
     });
 
     it('rejects passwords exceeding 128 characters during reset and change', async () => {
       const giantPassword = 'B'.repeat(129);
       await expect(
-        resetPasswordWithToken(db, 'token_xyz', giantPassword)
+        resetPasswordWithTotp(db, 'any_user', '123456', giantPassword)
       ).rejects.toThrow('Password cannot exceed 128 characters');
 
       await expect(
@@ -144,35 +142,10 @@ describe('TASK-017 Comprehensive Security & Hardening Tests', () => {
     });
 
     it('allows an administrator to update other users without restriction', async () => {
-      const { user: otherUser } = await registerUser(db, 'other@sec.com', 'OtherPass123!');
+      const { user: otherUser } = await registerUser(db, 'other_sec_user', 'OtherPass123!');
       const updated = await updateUserStatus(db, otherUser.id, { is_admin: 1, is_active: 0 }, adminId);
       expect(updated.is_admin).toBe(1);
       expect(updated.is_active).toBe(0);
-    });
-  });
-
-  describe('SMTP Command Injection Defense', () => {
-    it('throws when fromAddr or to contains CRLF characters', async () => {
-      const maliciousEmail = {
-        to: 'victim@example.com\r\nDATA\r\nInjected content',
-        subject: 'Subject',
-        html: '<p>test</p>',
-        text: 'test',
-      };
-
-      await expect(
-        sendSmtpEmail(
-          {
-            host: 'smtp.gmail.com',
-            port: 465,
-            username: 'sender@gmail.com',
-            password: 'secret',
-            from: 'sender@gmail.com',
-          },
-          maliciousEmail,
-          async () => ({} as any)
-        )
-      ).rejects.toThrow('Invalid email address: CRLF characters detected');
     });
   });
 

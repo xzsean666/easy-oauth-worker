@@ -6,9 +6,6 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 AUTH_URL = "http://localhost:8787"
 SITE_NAME = "easy-oauth-worker"
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = "465"
-SMTP_FROM = "EasyOAuth 认证中心 <cloud.mailer.service@gmail.com>"
 
 [[d1_databases]]
 binding = "DB"

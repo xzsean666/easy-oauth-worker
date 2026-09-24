@@ -116,7 +116,15 @@ export class MockD1Database implements D1Database {
 
 export function createTestDatabase(): MockD1Database {
   const db = new MockD1Database(':memory:');
-  const migrationPath = path.resolve(process.cwd(), 'migrations/0001_initial_schema.sql');
-  db.applyMigration(migrationPath);
+  const migrationsDir = path.resolve(process.cwd(), 'migrations');
+  if (fs.existsSync(migrationsDir)) {
+    const files = fs
+      .readdirSync(migrationsDir)
+      .filter((file) => file.endsWith('.sql'))
+      .sort();
+    for (const file of files) {
+      db.applyMigration(path.join(migrationsDir, file));
+    }
+  }
   return db;
 }

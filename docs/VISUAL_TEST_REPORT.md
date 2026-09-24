@@ -30,7 +30,7 @@
 
 - **UI/UX 验收要点**:
   - 采用极简居中卡片架构，`slate-900` 深色背景搭配 `slate-800/80` 毛玻璃半透明卡片与 `slate-700` 细边框。
-  - 邮箱与密码输入框支持即时聚焦环（Indigo Ring），并提供直观的“忘记密码”与“注册新账号”跳转引导。
+  - 用户名与密码输入框支持即时聚焦环（Indigo Ring），并提供直观的“忘记密码”与“注册新账号”跳转引导。
   - 包含全局品牌标识与底层 `easy-oauth-worker` 徽标。
 
 ---
@@ -58,35 +58,37 @@
   ![用户注册界面](screenshots/03_register_desktop.png)
 
 - **UI/UX 验收要点**:
-  - 提供邮箱、密码及确认密码三段式校验输入框。
+  - 提供纯用户名（3~32字符）、密码及确认密码三段式校验输入框，完全免除邮箱。
   - 密码输入长度限制为 8~128 字符，防止超长字符 DoS 攻击。
   - 页面底部提供直接返回登录的快速通道。
 
 ---
 
-#### 4. 忘记密码申请界面 (`/forgot-password`)
+#### 4. 忘记密码申请与重置界面 (`/forgot-password`)
 - **路由端点**: `GET /forgot-password`
 - **视口配置**: 1280 × 800 (Desktop)
 - **视觉截图**:
 
-  ![忘记密码申请界面](screenshots/04_forgot_password_desktop.png)
+  ![忘记密码申请与重置界面](screenshots/04_forgot_password_desktop.png)
 
 - **UI/UX 验收要点**:
-  - 清晰的找回密码说明文本，引导用户输入注册时使用的邮箱地址。
-  - 提交后触发带签名防篡改的邮件投递闭环流程，并展现优雅的邮件已发出状态卡片。
+  - 离线零费用找回密码方案：引导用户输入用户名及绑定的 Google Authenticator 6 位动态验证码。
+  - 提示信息明确告知：若未开启 2FA 则无法自助找回密码，需联系管理员重置。
+  - 验证成功后立即重置密码并吊销所有历史会话。
 
 ---
 
-#### 5. 密码重置表单界面 (`/reset-password`)
-- **路由端点**: `GET /reset-password?token=...`
+#### 5. 个人安全中心与 Google Authenticator 二步验证 (`/account/security`)
+- **路由端点**: `GET /account/security` (需要登录 Session)
 - **视口配置**: 1280 × 800 (Desktop)
 - **视觉截图**:
 
-  ![密码重置表单界面](screenshots/05_reset_password_desktop.png)
+  ![个人安全中心与 Google Authenticator 二步验证](screenshots/05_account_security_desktop.png)
 
 - **UI/UX 验收要点**:
-  - 隐藏携带 URL 签名 Token，要求用户输入并确认新密码。
-  - 成功重置后联动级联吊销该用户所有活跃 Session 与 OAuth Token。
+  - 用户自主选择开启或关闭 TOTP 2FA 双因素认证。
+  - 服务端纯原生生成高质量内嵌 SVG 二维码与 Base32 密钥，无需第三方图表 CDN。
+  - 扫描后输入 6 位有效动态口令即可即时完成绑定激活。
 
 ---
 
@@ -104,10 +106,10 @@
   - 顶部右上角标注 **Live Worker** 在线状态指示灯。
   - 四大核心指标卡片：
     - **TOTAL USERS**: 注册用户总数
-    - **VERIFIED USERS**: 邮箱已验证用户数
+    - **2FA BOUND USERS**: 已开启 Google 验证码双因素认证用户数
     - **ACTIVE SESSIONS**: 当前活跃会话凭据数
     - **OAUTH CLIENTS**: 系统内注册的 OAuth 客户端总数
-  - 快捷入口卡片快速跳转至对应功能模块，左下角显示当前登录管理员邮箱与安全登出按钮。
+  - 快捷入口卡片快速跳转至对应功能模块，左下角显示当前登录管理员用户名与安全登出按钮。
 
 ---
 
@@ -119,10 +121,10 @@
   ![用户管理控制台](screenshots/07_admin_users_desktop.png)
 
 - **UI/UX 验收要点**:
-  - 支持按邮箱关键字模糊搜索用户。
-  - 数据表清晰呈现用户 ID、邮箱地址、邮箱验证状态、激活状态、角色与注册时间。
+  - 支持按用户名关键字模糊搜索用户。
+  - 数据表清晰呈现用户 ID、用户名、2FA 状态（已开启/未开启）、激活状态、角色与注册时间。
   - 包含状态切换与防自锁死保护：禁止管理员禁用或降权自身账号。
-  - 提供会话一键强行撤回（Revoke All Sessions）与用户安全注销操作。
+  - 提供密码重置、会话一键强行撤回（Revoke All Sessions）与用户安全注销操作。
 
 ---
 
@@ -149,7 +151,7 @@
 
 - **UI/UX 验收要点**:
   - **Identity & OIDC Endpoints**: 汇总 Issuer、Discovery URL (`/.well-known/openid-configuration`) 及 JWKS URL (`/.well-known/jwks.json`)。
-  - **Gmail SMTP Gateway**: 实时显示 SMTP 服务器（`smtp.gmail.com:465`）、脱敏发信账号（`clo***@gmail.com`）及绿色 **Configured** 状态标签。
+  - **Offline Security & 2FA Engine**: 实时显示 RFC 6238 TOTP 规范、原生 Web Crypto HMAC-SHA1 签名与纯 TypeScript 内嵌 SVG 二维码引擎状态。
   - **Security & Cryptography Specifications**: 直观标明底层密码学规格：PBKDF2-SHA256 (100k rounds)、RS256 2048-bit RSA、PKCE S256 强制约束及 HttpOnly + Secure + Lax 会话 Cookie。
 
 ---
@@ -164,12 +166,11 @@
   ![OAuth 授权确认页 (桌面端)](screenshots/10_oauth_consent_desktop.png)
 
 - **UI/UX 验收要点**:
-  - 黄金钥匙图标视觉聚焦，清晰提示当前登录身份账号。
+  - 黄金钥匙图标视觉聚焦，清晰提示当前登录身份用户名。
   - 明示申请授权的第三方应用名称（如 `Demo Web Application (Confidential)`）。
   - 权限明细列表（Scopes）：
     - `OpenID Connect`: 验证用户身份与账号关联
     - `Profile Info`: 访问基础资料与时间戳
-    - `Email Address`: 查看主邮箱地址及验证状态
   - 包含 Session-Bound CSRF 防御令牌，确保用户点击“Authorize”或“Cancel”时不被跨站伪造。
 
 ---

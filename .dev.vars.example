@@ -43,27 +43,3 @@ SESSION_SECRET="your-super-secret-session-key-at-least-32-chars-long"
 #   npx tsx scripts/generate-keys.ts
 # 然后将输出的 OIDC_SIGNING_KEY JSON 字符串粘贴到下方（或通过 npx wrangler secret put OIDC_SIGNING_KEY 设定）：
 OIDC_SIGNING_KEY=""
-
-# ------------------------------------------------------------------------------
-# 3. 邮件发信服务配置 (Gmail SMTP / Cloudflare Sockets)
-# ------------------------------------------------------------------------------
-# 用于发送注册邮箱验证码/链接以及找回密码重置链接。
-# 项目原生使用 Cloudflare Workers TCP Sockets (cloudflare:sockets) 直连 Gmail SMTP 465 SSL/TLS 端口。
-# 若暂不配置 SMTP_USERNAME / SMTP_PASSWORD，系统会自动降级并在控制台输出包含链接的 Log，不影响主流程测试。
-#
-# SMTP 服务器地址（默认 Gmail）
-SMTP_HOST="smtp.gmail.com"
-
-# SMTP 服务端口（Gmail SSL 端口固定为 465）
-SMTP_PORT="465"
-
-# 发信 Gmail 邮箱地址
-SMTP_USERNAME="your-email@gmail.com"
-
-# Google 账号 16 位专用应用密码 (App Password，无空格)
-# 获取方法：Google 账号管理 -> 安全性 -> 两步验证 -> 应用专用密码 (App passwords)
-SMTP_PASSWORD="your16charpassword"
-
-# 发件人显示名称与地址（可选，缺省时自动使用 SMTP_USERNAME）
-# 示例："EasyOAuth <your-email@gmail.com>"
-SMTP_FROM="easy-oauth-worker <your-email@gmail.com>"

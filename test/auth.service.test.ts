@@ -3,11 +3,10 @@ import { createTestDatabase, MockD1Database } from './helpers/mock-d1';
 import {
   registerUser,
   loginWithPassword,
-  verifyEmailToken,
-  createPasswordResetToken,
-  resetPasswordWithToken,
   changePassword,
-  isValidEmail,
+  isValidUsername,
+  enableTotp,
+  resetPasswordWithTotp,
 } from '../src/services/auth.service';
 import {
   validateSession,
@@ -15,6 +14,7 @@ import {
   revokeAllUserSessions,
   createSession,
 } from '../src/services/session.service';
+import { generateTotpSecret, generateTotp } from '../src/crypto/totp';
 import { execute } from '../src/db/client';
 
 describe('Auth Service and Session Service Tests', () => {
@@ -24,145 +24,98 @@ describe('Auth Service and Session Service Tests', () => {
     db = createTestDatabase();
   });
 
-  describe('Email format validation', () => {
-    it('validates common valid and invalid emails', () => {
-      expect(isValidEmail('test@example.com')).toBe(true);
-      expect(isValidEmail('user.name+tag@sub.domain.org')).toBe(true);
-      expect(isValidEmail('plainaddress')).toBe(false);
-      expect(isValidEmail('@missinguser.com')).toBe(false);
-      expect(isValidEmail('missingdomain@.com')).toBe(false);
+  describe('Username format validation', () => {
+    it('validates common valid and invalid usernames', () => {
+      expect(isValidUsername('alice')).toBe(true);
+      expect(isValidUsername('bob_123')).toBe(true);
+      expect(isValidUsername('user-name-99')).toBe(true);
+      expect(isValidUsername('ab')).toBe(false); // too short
+      expect(isValidUsername('a'.repeat(33))).toBe(false); // too long
+      expect(isValidUsername('user with spaces')).toBe(false);
+      expect(isValidUsername('user@domain.com')).toBe(false); // email disallowed
     });
   });
 
   describe('User Registration', () => {
-    it('registers user, hashes password, and creates verification token', async () => {
-      const { user, verificationToken } = await registerUser(
+    it('registers user, hashes password, and activates account immediately', async () => {
+      const { user } = await registerUser(
         db,
-        'NewUser@Example.COM',
+        'NewUser',
         'ValidPassword123!'
       );
 
       expect(user.id).toBeDefined();
-      expect(user.email).toBe('newuser@example.com'); // normalized lowercase
-      expect(user.email_verified).toBe(0);
+      expect(user.username).toBe('NewUser');
       expect(user.is_active).toBe(1);
+      expect(user.totp_enabled).toBe(0);
       expect(user.password_hash.length).toBe(64);
-      expect(verificationToken).toBeDefined();
     });
 
-    it('rejects duplicate email registration', async () => {
-      await registerUser(db, 'duplicate@example.com', 'Password123!');
+    it('rejects duplicate username registration', async () => {
+      await registerUser(db, 'duplicate_user', 'Password123!');
       await expect(
-        registerUser(db, 'duplicate@example.com', 'AnotherPassword123!')
-      ).rejects.toThrow('Email is already registered');
+        registerUser(db, 'duplicate_user', 'AnotherPassword123!')
+      ).rejects.toThrow('Username is already taken');
     });
 
     it('rejects password shorter than 8 characters', async () => {
       await expect(
-        registerUser(db, 'short@example.com', 'short')
+        registerUser(db, 'short_pass_user', 'short')
       ).rejects.toThrow('Password must be at least 8 characters');
     });
 
-    it('rejects invalid email address', async () => {
+    it('rejects invalid username format', async () => {
       await expect(
-        registerUser(db, 'invalid-email', 'Password123!')
-      ).rejects.toThrow('Invalid email address format');
-    });
-  });
-
-  describe('Email Verification', () => {
-    it('verifies email using valid token', async () => {
-      const { user, verificationToken } = await registerUser(
-        db,
-        'verify@example.com',
-        'Password123!'
-      );
-      expect(user.email_verified).toBe(0);
-
-      const verifiedUser = await verifyEmailToken(db, verificationToken);
-      expect(verifiedUser.email_verified).toBe(1);
-    });
-
-    it('rejects already used verification token', async () => {
-      const { verificationToken } = await registerUser(
-        db,
-        'verify2@example.com',
-        'Password123!'
-      );
-
-      await verifyEmailToken(db, verificationToken);
-
-      await expect(verifyEmailToken(db, verificationToken)).rejects.toThrow(
-        'Invalid or already used verification link'
-      );
-    });
-
-    it('rejects expired verification token', async () => {
-      const { verificationToken } = await registerUser(
-        db,
-        'expired@example.com',
-        'Password123!'
-      );
-
-      // Force expire token in DB
-      await execute(
-        db,
-        'UPDATE verification_tokens SET expires_at = ? WHERE token = ?',
-        Math.floor(Date.now() / 1000) - 100,
-        verificationToken
-      );
-
-      await expect(verifyEmailToken(db, verificationToken)).rejects.toThrow(
-        'Verification link has expired'
-      );
+        registerUser(db, 'invalid@username', 'Password123!')
+      ).rejects.toThrow('Username must be 3-32 characters long');
     });
   });
 
   describe('Password Login & Session Lifecycle', () => {
     it('authenticates user and returns active session', async () => {
-      await registerUser(db, 'login@example.com', 'SecurePassword123!');
+      await registerUser(db, 'login_user', 'SecurePassword123!');
 
       const { user, session } = await loginWithPassword(
         db,
-        'LOGIN@EXAMPLE.COM',
+        'LOGIN_USER',
         'SecurePassword123!',
         'Mozilla/5.0'
       );
 
-      expect(user.email).toBe('login@example.com');
-      expect(session.id.startsWith('sess_')).toBe(true);
-      expect(session.user_agent).toBe('Mozilla/5.0');
+      expect(user.username).toBe('login_user');
+      expect(session!.id.startsWith('sess_')).toBe(true);
+      expect(session!.user_agent).toBe('Mozilla/5.0');
 
-      const validated = await validateSession(db, session.id);
+      const validated = await validateSession(db, session!.id);
       expect(validated).not.toBeNull();
       expect(validated?.user.id).toBe(user.id);
     });
 
     it('fails login with wrong password', async () => {
-      await registerUser(db, 'login2@example.com', 'SecurePassword123!');
+      await registerUser(db, 'login_fail', 'SecurePassword123!');
 
       await expect(
-        loginWithPassword(db, 'login2@example.com', 'WrongPassword!')
-      ).rejects.toThrow('Invalid email or password');
+        loginWithPassword(db, 'login_fail', 'WrongPassword!')
+      ).rejects.toThrow('Invalid username or password');
     });
 
-    it('fails login with non-existent email', async () => {
+    it('fails login with non-existent username', async () => {
       await expect(
-        loginWithPassword(db, 'nonexistent@example.com', 'Password123!')
-      ).rejects.toThrow('Invalid email or password');
+        loginWithPassword(db, 'nonexistent_user', 'Password123!')
+      ).rejects.toThrow('Invalid username or password');
     });
 
     it('fails login when account is deactivated', async () => {
-      const { user } = await registerUser(db, 'inactive@example.com', 'Password123!');
+      const { user } = await registerUser(db, 'inactive_user', 'Password123!');
       await execute(db, 'UPDATE users SET is_active = 0 WHERE id = ?', user.id);
 
       await expect(
-        loginWithPassword(db, 'inactive@example.com', 'Password123!')
+        loginWithPassword(db, 'inactive_user', 'Password123!')
       ).rejects.toThrow('Account has been deactivated');
     });
 
     it('invalidates expired session during validation', async () => {
-      const { user } = await registerUser(db, 'exp_sess@example.com', 'Password123!');
+      const { user } = await registerUser(db, 'exp_sess_user', 'Password123!');
       const session = await createSession(db, user.id, null, -10); // already expired
 
       const validated = await validateSession(db, session.id);
@@ -170,7 +123,7 @@ describe('Auth Service and Session Service Tests', () => {
     });
 
     it('revokes single session and multiple sessions', async () => {
-      const { user } = await registerUser(db, 'sess_test@example.com', 'Password123!');
+      const { user } = await registerUser(db, 'sess_test_user', 'Password123!');
       const s1 = await createSession(db, user.id);
       const s2 = await createSession(db, user.id);
 
@@ -188,14 +141,15 @@ describe('Auth Service and Session Service Tests', () => {
     });
   });
 
-  describe('Password Reset Flow', () => {
-    it('creates password reset token and resets password', async () => {
-      const { user } = await registerUser(db, 'reset@example.com', 'OldPassword123!');
+  describe('Password Reset with TOTP Flow', () => {
+    it('resets password using valid TOTP code and invalidates sessions/tokens', async () => {
+      const { user } = await registerUser(db, 'reset_user', 'OldPassword123!');
       const initialSession = await createSession(db, user.id);
 
-      const resetData = await createPasswordResetToken(db, 'reset@example.com');
-      expect(resetData).not.toBeNull();
-      expect(resetData?.token).toBeDefined();
+      // Enable TOTP
+      const secret = generateTotpSecret(20);
+      const code = await generateTotp(secret);
+      await enableTotp(db, user.id, secret, code);
 
       // Seed an active OAuth client and token for this user
       await execute(
@@ -210,25 +164,19 @@ describe('Auth Service and Session Service Tests', () => {
         user.id
       );
 
-      const updatedUser = await resetPasswordWithToken(
+      const resetCode = await generateTotp(secret);
+      const updatedUser = await resetPasswordWithTotp(
         db,
-        resetData!.token,
+        'reset_user',
+        resetCode,
         'BrandNewPassword456!'
       );
       expect(updatedUser.id).toBe(user.id);
 
       // Old password should now fail
       await expect(
-        loginWithPassword(db, 'reset@example.com', 'OldPassword123!')
-      ).rejects.toThrow('Invalid email or password');
-
-      // New password should succeed
-      const { session: newSession } = await loginWithPassword(
-        db,
-        'reset@example.com',
-        'BrandNewPassword456!'
-      );
-      expect(newSession).toBeDefined();
+        loginWithPassword(db, 'reset_user', 'OldPassword123!')
+      ).rejects.toThrow('Invalid username or password');
 
       // Old session was revoked
       const oldSessCheck = await validateSession(db, initialSession.id);
@@ -241,15 +189,17 @@ describe('Auth Service and Session Service Tests', () => {
       expect(tokenRow?.revoked).toBe(1);
     });
 
-    it('returns null when requesting reset for non-existent email', async () => {
-      const res = await createPasswordResetToken(db, 'nobody@example.com');
-      expect(res).toBeNull();
+    it('rejects reset for user who has not enabled TOTP', async () => {
+      await registerUser(db, 'no_totp_reset', 'OldPassword123!');
+      await expect(
+        resetPasswordWithTotp(db, 'no_totp_reset', '123456', 'NewPassword123!')
+      ).rejects.toThrow('This account does not have Google Authenticator enabled');
     });
   });
 
   describe('Password Change Flow', () => {
     it('changes password when old password matches and invalidates old sessions and oauth tokens', async () => {
-      const { user } = await registerUser(db, 'change@example.com', 'CurrentPassword123!');
+      const { user } = await registerUser(db, 'change_user', 'CurrentPassword123!');
       const session = await createSession(db, user.id);
 
       // Seed an active OAuth client and token for this user
@@ -269,12 +219,12 @@ describe('Auth Service and Session Service Tests', () => {
 
       // Old password fails
       await expect(
-        loginWithPassword(db, 'change@example.com', 'CurrentPassword123!')
-      ).rejects.toThrow('Invalid email or password');
+        loginWithPassword(db, 'change_user', 'CurrentPassword123!')
+      ).rejects.toThrow('Invalid username or password');
 
       // New password succeeds
       await expect(
-        loginWithPassword(db, 'change@example.com', 'NewPassword789!')
+        loginWithPassword(db, 'change_user', 'NewPassword789!')
       ).resolves.toBeDefined();
 
       // Old session revoked
@@ -288,7 +238,7 @@ describe('Auth Service and Session Service Tests', () => {
     });
 
     it('rejects password change if current password is wrong', async () => {
-      const { user } = await registerUser(db, 'change2@example.com', 'CurrentPassword123!');
+      const { user } = await registerUser(db, 'change_user_wrong', 'CurrentPassword123!');
 
       await expect(
         changePassword(db, user.id, 'WrongCurrentPassword', 'NewPassword789!')

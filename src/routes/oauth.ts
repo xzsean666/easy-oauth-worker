@@ -116,7 +116,7 @@ oauthRoutes.get('/oauth/authorize', async (c) => {
     ConsentView({
       siteName: c.env.SITE_NAME,
       clientName: client.client_name,
-      userEmail: sessionData.user.email,
+      userName: sessionData.user.username,
       scopes: requestedScopes,
       clientId,
       redirectUri,

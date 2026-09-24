@@ -32,14 +32,14 @@ describe('Admin Service and Admin API Tests', () => {
     };
 
     // 1. Create Admin user
-    const { user: adminUser } = await registerUser(db, 'admin@example.com', 'AdminPass123!');
+    const { user: adminUser } = await registerUser(db, 'admin', 'AdminPass123!');
     adminId = adminUser.id;
-    await execute(db, 'UPDATE users SET is_admin = 1, email_verified = 1 WHERE id = ?', adminId);
+    await execute(db, 'UPDATE users SET is_admin = 1 WHERE id = ?', adminId);
     const adminSess = await createSession(db, adminId);
     adminSessionId = adminSess.id;
 
     // 2. Create Regular user
-    const { user: regUser } = await registerUser(db, 'regular@example.com', 'RegularPass123!');
+    const { user: regUser } = await registerUser(db, 'regular', 'RegularPass123!');
     regularUserId = regUser.id;
     const regSess = await createSession(db, regularUserId);
     regularSessionId = regSess.id;
@@ -84,13 +84,13 @@ describe('Admin Service and Admin API Tests', () => {
     it('calculates metrics accurately', async () => {
       // Create a test client
       await createClient(db, {
-        name: 'Dashboard Client',
+        clientName: 'Dashboard Client',
         redirectUris: ['https://example.com/cb'],
       });
 
       const stats = await getDashboardStats(db);
       expect(stats.totalUsers).toBe(2);
-      expect(stats.verifiedUsers).toBe(1); // admin is verified, regular is not
+      expect(stats.totpUsers).toBe(0);
       expect(stats.activeSessions).toBe(2);
       expect(stats.totalClients).toBe(1);
     });
@@ -106,7 +106,7 @@ describe('Admin Service and Admin API Tests', () => {
 
       const filtered = await listUsers(db, { search: 'reg' });
       expect(filtered.total).toBe(1);
-      expect(filtered.users[0].email).toBe('regular@example.com');
+      expect(filtered.users[0].username).toBe('regular');
     });
 
     it('updates user status and automatically revokes sessions when deactivated', async () => {
@@ -123,7 +123,7 @@ describe('Admin Service and Admin API Tests', () => {
 
     it('prevents administrator from deleting their own account', async () => {
       await expect(deleteUser(db, adminId, adminId)).rejects.toThrow(
-        'cannot delete your own administrator account'
+        'cannot delete your own account'
       );
     });
 
@@ -150,7 +150,7 @@ describe('Admin Service and Admin API Tests', () => {
           body: JSON.stringify({
             name: 'API Client App',
             redirect_uris: ['https://app.com/callback'],
-            allowed_scopes: ['openid', 'email'],
+            allowed_scopes: ['openid', 'profile'],
             is_public: false,
           }),
         },
@@ -158,9 +158,9 @@ describe('Admin Service and Admin API Tests', () => {
       );
 
       expect(createRes.status).toBe(201);
-      const createData = (await createRes.json()) as { client: any; plainSecret: string };
+      const createData = (await createRes.json()) as { client: any; secret: string };
       expect(createData.client.client_name).toBe('API Client App');
-      expect(createData.plainSecret).toBeDefined();
+      expect(createData.secret).toBeDefined();
       const newClientId = createData.client.client_id;
 
       // 2. GET /api/admin/clients
@@ -187,7 +187,7 @@ describe('Admin Service and Admin API Tests', () => {
       expect(rotateRes.status).toBe(200);
       const rotateData = (await rotateRes.json()) as { newSecret: string };
       expect(rotateData.newSecret).toBeDefined();
-      expect(rotateData.newSecret).not.toBe(createData.plainSecret);
+      expect(rotateData.newSecret).not.toBe(createData.secret);
 
       // 4. DELETE /api/admin/clients/:id
       const delRes = await app.request(

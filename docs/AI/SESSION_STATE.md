@@ -1,33 +1,36 @@
 # Session State
 
 - **当前 Goal**: 构建轻量级自托管 OAuth 2.0 / OpenID Connect Provider (`easy-oauth-worker`)
-- **当前 Task**: TASK-023 (默认启用极速部署模式与按需深度校验支持)
-- **当前状态**: COMPLETED (DONE)
+- **当前 Task**: TASK-028 (端到端可视化回归测试与全套高清界面截图更新)
+- **当前状态**: COMPLETED
 - **已完成内容**:
-  - **默认极速部署 (Default Fast Mode)**:
-    - 将 `scripts/deploy-pages.sh` 的默认行为全面升级为 Fast 模式：直接执行 `bash scripts/deploy-pages.sh` 或 `pnpm run deploy:pages`，跳过耗时的测试套件与重复 D1 迁移探测，非交互式直发 Pages。
-    - 自动提取并复用已有的生产 D1 数据库 UUID（`8702c798-a252-452d-a8a6-6ad77ccdbc61`），动态配置 Pages 绑定 `DB`，2~3 秒内秒级完成代码发布与自动绑定。
-  - **按需扩展参数支持**:
-    - 增加 `--test` / `-t`：显式触发类型检查与测试套件；
-    - 增加 `--migrate` / `-m`：显式触发远程 D1 数据库 Schema 迁移；
-    - 增加 `--full`：一键全套自检与迁移；
-    - 完美保持所有原有参数（`--fast`, `--skip-tests`, `--skip-migrate`, `--seed`, `--db-id` 等）向后兼容。
-  - **文档与测试套件保障**:
-    - 更新 `README.md`，将默认秒级极速发布作为基础推荐命令。
-    - 保持全部 15 个自动化测试套件（129 个用例）和 TypeScript 类型检查 100% 通过。
+  - 启动了本地 `wrangler dev` 真实服务并执行自动化测试驱动脚本 `scripts/visual-test.js`；
+  - 基于 Chromium 152 无头 CDP 协议与 2x Retina 高清输出，全量重新捕获并更新了全套 12 个视图的高清截图；
+  - 重点验证了 `docs/screenshots/05_account_security_desktop.png`，完美呈现了新落地的白底高对比度 SVG 二维码卡片与身份验证器扫码引导；
+  - 运行 `test/visual-assets.test.ts` 验证资产完备性（3/3 passed）；
+  - 运行全量测试套件（17 个测试文件、140 个测试用例）及 TypeScript 类型检查，100% 成功通过。
 - **修改过的文件**:
-  - `scripts/deploy-pages.sh`
-  - `README.md`
+  - `docs/screenshots/01_login_desktop.png`
+  - `docs/screenshots/02_login_mobile.png`
+  - `docs/screenshots/03_register_desktop.png`
+  - `docs/screenshots/04_forgot_password_desktop.png`
+  - `docs/screenshots/05_account_security_desktop.png`
+  - `docs/screenshots/06_admin_dashboard_desktop.png`
+  - `docs/screenshots/07_admin_users_desktop.png`
+  - `docs/screenshots/08_admin_clients_desktop.png`
+  - `docs/screenshots/09_admin_settings_desktop.png`
+  - `docs/screenshots/10_oauth_consent_desktop.png`
+  - `docs/screenshots/11_oauth_consent_mobile.png`
+  - `docs/screenshots/12_oauth_error_invalid_redirect.png`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 - **创建过的文件**:
-  - `docs/AI/tasks/TASK-023.md`
+  - `docs/AI/tasks/TASK-028.md`
+- **删除的文件**: 无
 - **已运行的验证命令及结果**:
-  - `bash scripts/deploy-pages.sh` (退出码 0，直接运行默认秒级发布成功，自动绑定 D1，耗时约 2 秒)
-  - `bash scripts/deploy-pages.sh --help` (退出码 0，包含完整的默认与按需选项)
-  - `pnpm test test/pages-deploy.test.ts` (5/5 全部通过)
-  - `pnpm run typecheck` (退出码 0，TypeScript 检查 0 错误)
-  - `pnpm run test` (退出码 0，15 个测试套件，129 个测试用例全量通过)
-  - `node -e '...'` (在线模拟登录请求验证 D1 读写正常，返回 302 及 Set-Cookie)
+  - `node scripts/visual-test.js`: All 12 visual screenshots captured successfully
+  - `pnpm test test/visual-assets.test.ts`: 3 passed
+  - `pnpm run typecheck`: 0 errors
+  - `pnpm test`: 17 test files passed, 140 tests passed, 0 failures
 - **未解决问题**: 无
-- **后续任务**: 用户无需添加任何参数，在本地直接运行 `bash scripts/deploy-pages.sh` 或 `pnpm run deploy:pages` 即可享受秒级极速部署体验。
+- **后续任务**: 全套视觉资产已全部刷新更新，已真实体现 TOTP 二维码扫码卡片与最新纯用户名架构界面。

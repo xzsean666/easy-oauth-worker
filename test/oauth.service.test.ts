@@ -34,7 +34,7 @@ describe('OAuth 2.0 Service Tests', () => {
       clientSecret,
       'Test App',
       JSON.stringify([redirectUri, 'https://app.example.com/alt-callback']),
-      JSON.stringify(['openid', 'profile', 'email']),
+      JSON.stringify(['openid', 'profile']),
       0,
       now,
       now
@@ -49,14 +49,14 @@ describe('OAuth 2.0 Service Tests', () => {
       '',
       'Public SPA App',
       JSON.stringify(['https://spa.example.com/callback']),
-      JSON.stringify(['openid', 'email']),
+      JSON.stringify(['openid', 'profile']),
       1,
       now,
       now
     );
 
     // Seed user
-    const { user } = await registerUser(db, 'oauth_user@example.com', 'Password123!');
+    const { user } = await registerUser(db, 'oauth_user', 'Password123!');
     userId = user.id;
   });
 
@@ -101,7 +101,7 @@ describe('OAuth 2.0 Service Tests', () => {
         clientId,
         userId,
         redirectUri,
-        scope: 'openid email',
+        scope: 'openid profile',
         codeChallenge: challenge,
         codeChallengeMethod: 'S256',
       });
@@ -133,7 +133,7 @@ describe('OAuth 2.0 Service Tests', () => {
         clientId,
         userId,
         redirectUri,
-        scope: 'openid email',
+        scope: 'openid profile',
         codeChallenge: challenge,
         codeChallengeMethod: 'S256',
       });
@@ -248,7 +248,7 @@ describe('OAuth 2.0 Service Tests', () => {
         clientId,
         userId,
         redirectUri,
-        scope: 'openid email',
+        scope: 'openid profile',
         codeChallenge: challenge,
       });
 
@@ -326,7 +326,7 @@ describe('OAuth 2.0 Service Tests', () => {
         clientId,
         userId,
         redirectUri,
-        scope: 'openid email',
+        scope: 'openid profile',
         codeChallenge: challenge,
       });
 
@@ -344,7 +344,7 @@ describe('OAuth 2.0 Service Tests', () => {
           clientId,
           clientSecret,
           refreshToken: tokens.refresh_token!,
-          scope: 'openid email admin:write',
+          scope: 'openid profile admin:write',
         })
       ).rejects.toThrow("Scope 'admin:write' exceeds originally granted scopes");
 
@@ -432,7 +432,7 @@ describe('OAuth 2.0 Service Tests', () => {
       const client = await validateClient(db, clientId);
 
       expect(() => {
-        validateClientScope(client, 'openid email');
+        validateClientScope(client, 'openid profile');
       }).not.toThrow();
 
       expect(() => {

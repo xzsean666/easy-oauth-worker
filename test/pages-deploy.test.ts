@@ -55,6 +55,7 @@ describe('Cloudflare Pages Deployment Configuration & Adaptation', () => {
     expect(helpOutput).toContain('--db-id');
     expect(helpOutput).toContain('--skip-tests');
     expect(helpOutput).toContain('--skip-migrate');
+    expect(helpOutput).toContain('--reset-db');
     expect(helpOutput).toContain('--seed');
   });
 

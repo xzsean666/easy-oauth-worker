@@ -3,7 +3,7 @@ import { Layout } from '../layout';
 interface ConsentViewProps {
   siteName?: string;
   clientName: string;
-  userEmail: string;
+  userName: string;
   scopes: string[];
   clientId: string;
   redirectUri: string;
@@ -20,10 +20,6 @@ const SCOPE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
     label: 'OpenID Connect',
     desc: 'Verify your identity and associate your account',
   },
-  email: {
-    label: 'Email Address',
-    desc: 'View your primary email address and verification status',
-  },
   profile: {
     label: 'Profile Info',
     desc: 'Access your basic profile data and account timestamps',
@@ -33,7 +29,7 @@ const SCOPE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
 export const ConsentView = ({
   siteName,
   clientName,
-  userEmail,
+  userName,
   scopes,
   clientId,
   redirectUri,
@@ -52,7 +48,7 @@ export const ConsentView = ({
         </div>
         <h2 class="text-xl font-bold text-white">Authorization Request</h2>
         <p class="text-xs text-slate-400">
-          Logged in as <span class="font-medium text-slate-200">{userEmail}</span>
+          Logged in as <span class="font-medium text-slate-200">{userName}</span>
         </p>
       </div>
 

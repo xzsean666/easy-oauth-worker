@@ -14,12 +14,12 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
   let mockEnv: Bindings;
   const mockUser: User = {
     id: 'usr_oidc_123',
-    email: 'oidc.tester@example.com',
+    username: 'oidc_tester',
     password_hash: 'hash',
     password_salt: 'salt',
-    email_verified: 1,
     is_active: 1,
     is_admin: 0,
+    totp_enabled: 0,
     created_at: 1700000000,
     updated_at: 1700005000,
   };
@@ -46,7 +46,7 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
       expect(config.response_types_supported).toContain('code');
       expect(config.id_token_signing_alg_values_supported).toContain('RS256');
       expect(config.code_challenge_methods_supported).toContain('S256');
-      expect(config.scopes_supported).toEqual(expect.arrayContaining(['openid', 'email', 'profile']));
+      expect(config.scopes_supported).toEqual(expect.arrayContaining(['openid', 'profile']));
     });
   });
 
@@ -75,7 +75,7 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
       const idToken = await generateIdToken(mockEnv, {
         clientId: 'client_xyz',
         user: mockUser,
-        scope: 'openid email',
+        scope: 'openid profile',
         nonce: 'nonce_random_abc',
       });
 
@@ -88,8 +88,7 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
         iss: string;
         sub: string;
         aud: string;
-        email: string;
-        email_verified: boolean;
+        preferred_username: string;
         nonce: string;
         auth_time: number;
       }>(idToken, keyInfo.publicKey);
@@ -97,25 +96,10 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
       expect(verified.iss).toBe('https://auth.example.com');
       expect(verified.sub).toBe(mockUser.id);
       expect(verified.aud).toBe('client_xyz');
-      expect(verified.email).toBe('oidc.tester@example.com');
-      expect(verified.email_verified).toBe(true);
+      expect(verified.preferred_username).toBe('oidc_tester');
       expect(verified.nonce).toBe('nonce_random_abc');
       expect(typeof verified.auth_time).toBe('number');
       expect(verified.auth_time).toBeGreaterThan(0);
-    });
-
-    it('omits email claim when email scope is not requested', async () => {
-      const idToken = await generateIdToken(mockEnv, {
-        clientId: 'client_xyz',
-        user: mockUser,
-        scope: 'openid profile',
-      });
-
-      const keyInfo = await getSigningKey(mockEnv);
-      const verified = await verifyJwt<Record<string, unknown>>(idToken, keyInfo.publicKey);
-
-      expect(verified.sub).toBe(mockUser.id);
-      expect(verified.email).toBeUndefined();
     });
   });
 
@@ -123,20 +107,16 @@ describe('OpenID Connect (OIDC) Service Tests', () => {
     it('filters claims based on scopes provided', () => {
       // openid only
       const baseClaims = getUserInfoClaims(mockUser, 'openid');
-      expect(baseClaims).toEqual({ sub: mockUser.id });
-
-      // openid + email
-      const emailClaims = getUserInfoClaims(mockUser, 'openid email');
-      expect(emailClaims).toEqual({
+      expect(baseClaims).toEqual({
         sub: mockUser.id,
-        email: 'oidc.tester@example.com',
-        email_verified: true,
+        preferred_username: 'oidc_tester',
       });
 
       // openid + profile
       const profileClaims = getUserInfoClaims(mockUser, 'openid profile');
       expect(profileClaims).toEqual({
         sub: mockUser.id,
+        preferred_username: 'oidc_tester',
         updated_at: 1700005000,
       });
     });

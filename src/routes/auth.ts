@@ -4,25 +4,27 @@ import type { AppContext } from '../types/env';
 import {
   registerUser,
   loginWithPassword,
-  verifyEmailToken,
-  createPasswordResetToken,
-  resetPasswordWithToken,
+  verifyLogin2fa,
+  enableTotp,
+  disableTotp,
+  resetPasswordWithTotp,
+  createVerificationToken,
 } from '../services/auth.service';
-import { validateSession, revokeSession } from '../services/session.service';
-import { sendEmail } from '../services/email.service';
-import {
-  getVerifyEmailTemplate,
-  getResetPasswordTemplate,
-} from '../views/email/templates';
+import { validateSession, revokeSession, createSession } from '../services/session.service';
+import { generateTotpSecret, generateTotpUri } from '../crypto/totp';
+import { generateQrCodeSvg } from '../crypto/qr';
+import { queryFirst } from '../db/client';
+import type { VerificationToken } from '../db/schema';
 import { LoginView } from '../views/auth/login';
+import { Login2faView } from '../views/auth/login-2fa';
 import { RegisterView } from '../views/auth/register';
 import { ForgotPasswordView } from '../views/auth/forgot-password';
-import { ResetPasswordView } from '../views/auth/reset-password';
-import { VerifyEmailView } from '../views/auth/verify-email';
+import { SecurityView } from '../views/account/security';
 import { rateLimiter } from '../middlewares/rate-limit';
 
 export const SESSION_COOKIE_NAME = 'easy_session';
 export const SESSION_COOKIE_MAX_AGE = 7 * 24 * 3600;
+export const TWO_FACTOR_COOKIE_NAME = 'easy_2fa_ticket';
 
 export const authRoutes = new Hono<AppContext>();
 
@@ -52,7 +54,6 @@ export function sanitizeReturnTo(
   const trimmed = returnTo.trim();
   if (!trimmed) return '/';
 
-  // Safe relative path: starts with single slash, not followed by / or \
   if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
     return trimmed;
   }
@@ -96,16 +97,41 @@ authRoutes.get('/login', async (c) => {
 // POST /login
 authRoutes.post('/login', authLimiter, async (c) => {
   const body = await c.req.parseBody();
-  const email = (body.email as string) || '';
+  const rawUsername =
+    (body.username as string) ||
+    (body.identifier as string) ||
+    '';
   const password = (body.password as string) || '';
   const rawReturnTo = (body.return_to as string) || undefined;
   const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
   const userAgent = c.req.header('user-agent') || null;
 
   try {
-    const { session } = await loginWithPassword(c.env.DB, email, password, userAgent);
+    const result = await loginWithPassword(c.env.DB, rawUsername, password, userAgent);
 
-    setCookie(c, SESSION_COOKIE_NAME, session.id, {
+    if (result.requires2fa) {
+      // 2FA required: create a short-lived 5-minute ticket
+      const ticket = await createVerificationToken(c.env.DB, result.user.id, 'login_2fa', 300);
+
+      setCookie(c, TWO_FACTOR_COOKIE_NAME, ticket, {
+        httpOnly: true,
+        secure: isSecure(c.req.url),
+        path: '/',
+        sameSite: 'Lax',
+        maxAge: 300,
+      });
+
+      const params = new URLSearchParams();
+      params.set('ticket', ticket);
+      if (safeReturnTo !== '/') {
+        params.set('return_to', safeReturnTo);
+      }
+
+      return c.redirect(`/login/2fa?${params.toString()}`);
+    }
+
+    // Normal login: set session cookie
+    setCookie(c, SESSION_COOKIE_NAME, result.session!.id, {
       httpOnly: true,
       secure: isSecure(c.req.url),
       path: '/',
@@ -121,7 +147,89 @@ authRoutes.post('/login', authLimiter, async (c) => {
       LoginView({
         siteName: c.env.SITE_NAME,
         error: errorMsg,
-        email,
+        username: rawUsername,
+        returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
+      })
+    );
+  }
+});
+
+// GET /login/2fa
+authRoutes.get('/login/2fa', async (c) => {
+  const ticket = c.req.query('ticket') || getCookie(c, TWO_FACTOR_COOKIE_NAME);
+  const rawReturnTo = c.req.query('return_to');
+  const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
+
+  if (!ticket) {
+    return c.redirect('/login');
+  }
+
+  return c.html(
+    Login2faView({
+      siteName: c.env.SITE_NAME,
+      ticket,
+      returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
+    })
+  );
+});
+
+// POST /login/2fa
+authRoutes.post('/login/2fa', authLimiter, async (c) => {
+  const body = await c.req.parseBody();
+  const ticket = (body.ticket as string) || getCookie(c, TWO_FACTOR_COOKIE_NAME) || '';
+  const totpCode = (body.totp_code as string) || '';
+  const rawReturnTo = (body.return_to as string) || undefined;
+  const safeReturnTo = sanitizeReturnTo(rawReturnTo, c.req.url, c.env.AUTH_URL);
+  const userAgent = c.req.header('user-agent') || null;
+
+  if (!ticket) {
+    return c.redirect('/login');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const tokenRecord = await queryFirst<VerificationToken>(
+    c.env.DB,
+    'SELECT * FROM verification_tokens WHERE token = ? AND type = ?',
+    ticket,
+    'login_2fa'
+  );
+
+  if (!tokenRecord || tokenRecord.used === 1 || tokenRecord.expires_at <= now) {
+    c.status(400);
+    return c.html(
+      Login2faView({
+        siteName: c.env.SITE_NAME,
+        error: 'Authentication ticket has expired. Please sign in again.',
+        ticket,
+        returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
+      })
+    );
+  }
+
+  try {
+    const { session } = await verifyLogin2fa(c.env.DB, tokenRecord.user_id, totpCode, userAgent);
+
+    // Consume ticket
+    await c.env.DB.prepare('UPDATE verification_tokens SET used = 1 WHERE token = ?').bind(ticket).run();
+    deleteCookie(c, TWO_FACTOR_COOKIE_NAME, { path: '/' });
+
+    setCookie(c, SESSION_COOKIE_NAME, session.id, {
+      httpOnly: true,
+      secure: isSecure(c.req.url),
+      path: '/',
+      sameSite: 'Lax',
+      maxAge: SESSION_COOKIE_MAX_AGE,
+    });
+
+    return c.redirect(safeReturnTo);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Invalid verification code';
+    c.status(400);
+    return c.html(
+      Login2faView({
+        siteName: c.env.SITE_NAME,
+        error: errorMsg,
+        ticket,
         returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
       })
     );
@@ -152,7 +260,7 @@ authRoutes.get('/register', async (c) => {
 // POST /register
 authRoutes.post('/register', authLimiter, async (c) => {
   const body = await c.req.parseBody();
-  const email = (body.email as string) || '';
+  const username = ((body.username as string) || '').trim();
   const password = (body.password as string) || '';
   const confirmPassword = (body.confirm_password as string) || '';
   const rawReturnTo = (body.return_to as string) || undefined;
@@ -164,33 +272,27 @@ authRoutes.post('/register', authLimiter, async (c) => {
       RegisterView({
         siteName: c.env.SITE_NAME,
         error: 'Passwords do not match',
-        email,
+        username,
         returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
       })
     );
   }
 
   try {
-    const { verificationToken } = await registerUser(c.env.DB, email, password);
+    const { user } = await registerUser(c.env.DB, username, password);
 
-    const authBaseUrl = (c.env.AUTH_URL || '').replace(/\/+$/, '') || new URL(c.req.url).origin;
-    const verifyUrl = `${authBaseUrl}/verify-email?token=${verificationToken}`;
-    const emailTemplate = getVerifyEmailTemplate(c.env.SITE_NAME || 'EasyOAuth', verifyUrl);
-
-    await sendEmail(c.env, {
-      to: email,
-      subject: emailTemplate.subject,
-      html: emailTemplate.html,
-      text: emailTemplate.text,
+    // Immediate activation and automatic sign-in
+    const session = await createSession(c.env.DB, user.id, c.req.header('user-agent') || null);
+    setCookie(c, SESSION_COOKIE_NAME, session.id, {
+      httpOnly: true,
+      secure: isSecure(c.req.url),
+      path: '/',
+      sameSite: 'Lax',
+      maxAge: SESSION_COOKIE_MAX_AGE,
     });
 
-    return c.html(
-      VerifyEmailView({
-        siteName: c.env.SITE_NAME,
-        status: 'pending',
-        message: 'Account created! Please check your email inbox to verify your account before logging in.',
-      })
-    );
+    const targetUrl = safeReturnTo !== '/' ? safeReturnTo : '/account/security';
+    return c.redirect(targetUrl);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to register account';
     c.status(400);
@@ -198,45 +300,128 @@ authRoutes.post('/register', authLimiter, async (c) => {
       RegisterView({
         siteName: c.env.SITE_NAME,
         error: errorMsg,
-        email,
+        username,
         returnTo: safeReturnTo !== '/' ? safeReturnTo : undefined,
       })
     );
   }
 });
 
-// GET /verify-email
-authRoutes.get('/verify-email', async (c) => {
-  const token = c.req.query('token');
-
-  if (!token) {
-    c.status(400);
-    return c.html(
-      VerifyEmailView({
-        siteName: c.env.SITE_NAME,
-        status: 'error',
-        message: 'Missing verification token parameter.',
-      })
-    );
+// GET /account/security
+authRoutes.get('/account/security', async (c) => {
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  if (!sessionId) {
+    return c.redirect('/login?return_to=/account/security');
   }
 
+  const sessionData = await validateSession(c.env.DB, sessionId);
+  if (!sessionData) {
+    return c.redirect('/login?return_to=/account/security');
+  }
+
+  const { user } = sessionData;
+  let secret: string | undefined;
+  let uri: string | undefined;
+  let qrSvg: string | undefined;
+
+  if (user.totp_enabled !== 1) {
+    secret = generateTotpSecret(20);
+    uri = generateTotpUri(user.username, secret, c.env.SITE_NAME || 'EasyOAuth');
+    qrSvg = generateQrCodeSvg(uri);
+  }
+
+  return c.html(
+    SecurityView({
+      siteName: c.env.SITE_NAME,
+      user,
+      secret,
+      uri,
+      qrSvg,
+    })
+  );
+});
+
+// POST /account/security/enable-totp
+authRoutes.post('/account/security/enable-totp', authLimiter, async (c) => {
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  if (!sessionId) {
+    return c.redirect('/login');
+  }
+
+  const sessionData = await validateSession(c.env.DB, sessionId);
+  if (!sessionData) {
+    return c.redirect('/login');
+  }
+
+  const body = await c.req.parseBody();
+  const secret = (body.secret as string) || '';
+  const totpCode = (body.totp_code as string) || '';
+
   try {
-    await verifyEmailToken(c.env.DB, token);
+    const updatedUser = await enableTotp(c.env.DB, sessionData.user.id, secret, totpCode);
     return c.html(
-      VerifyEmailView({
+      SecurityView({
         siteName: c.env.SITE_NAME,
-        status: 'success',
-        message: 'Your email address has been successfully verified! You may now sign in.',
+        user: updatedUser,
+        success: 'Google Authenticator 2FA has been successfully enabled! Your account is now secured.',
       })
     );
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Invalid or expired verification token';
+    const errorMsg = err instanceof Error ? err.message : 'Failed to enable Google Authenticator';
+    const uri = generateTotpUri(sessionData.user.username, secret, c.env.SITE_NAME || 'EasyOAuth');
+    const qrSvg = generateQrCodeSvg(uri);
+
     c.status(400);
     return c.html(
-      VerifyEmailView({
+      SecurityView({
         siteName: c.env.SITE_NAME,
-        status: 'error',
-        message: errorMsg,
+        user: sessionData.user,
+        secret,
+        uri,
+        qrSvg,
+        error: errorMsg,
+      })
+    );
+  }
+});
+
+// POST /account/security/disable-totp
+authRoutes.post('/account/security/disable-totp', authLimiter, async (c) => {
+  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+  if (!sessionId) {
+    return c.redirect('/login');
+  }
+
+  const sessionData = await validateSession(c.env.DB, sessionId);
+  if (!sessionData) {
+    return c.redirect('/login');
+  }
+
+  const body = await c.req.parseBody();
+  const currentPassword = (body.current_password as string) || '';
+
+  try {
+    const updatedUser = await disableTotp(c.env.DB, sessionData.user.id, currentPassword);
+    const newSecret = generateTotpSecret(20);
+    const newUri = generateTotpUri(updatedUser.username, newSecret, c.env.SITE_NAME || 'EasyOAuth');
+
+    return c.html(
+      SecurityView({
+        siteName: c.env.SITE_NAME,
+        user: updatedUser,
+        secret: newSecret,
+        uri: newUri,
+        success: 'Google Authenticator has been disabled. Note: You will no longer be able to self-service recover your password.',
+      })
+    );
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Failed to disable 2FA';
+    c.status(400);
+    return c.html(
+      SecurityView({
+        siteName: c.env.SITE_NAME,
+        user: sessionData.user,
+        error: errorMsg,
       })
     );
   }
@@ -254,90 +439,40 @@ authRoutes.get('/forgot-password', (c) => {
 // POST /forgot-password
 authRoutes.post('/forgot-password', authLimiter, async (c) => {
   const body = await c.req.parseBody();
-  const email = (body.email as string) || '';
-
-  try {
-    const resetData = await createPasswordResetToken(c.env.DB, email);
-    if (resetData) {
-      const authBaseUrl = (c.env.AUTH_URL || '').replace(/\/+$/, '') || new URL(c.req.url).origin;
-      const resetUrl = `${authBaseUrl}/reset-password?token=${resetData.token}`;
-      const emailTemplate = getResetPasswordTemplate(c.env.SITE_NAME || 'EasyOAuth', resetUrl);
-
-      await sendEmail(c.env, {
-        to: resetData.user.email,
-        subject: emailTemplate.subject,
-        html: emailTemplate.html,
-        text: emailTemplate.text,
-      });
-    }
-  } catch {
-    // Suppress errors to avoid account enumeration
-  }
-
-  return c.html(
-    ForgotPasswordView({
-      siteName: c.env.SITE_NAME,
-      success: 'If an account exists with that email, instructions have been sent.',
-      email,
-    })
-  );
-});
-
-// GET /reset-password
-authRoutes.get('/reset-password', (c) => {
-  const token = c.req.query('token');
-  if (!token) {
-    return c.redirect('/login');
-  }
-
-  return c.html(
-    ResetPasswordView({
-      siteName: c.env.SITE_NAME,
-      token,
-    })
-  );
-});
-
-// POST /reset-password
-authRoutes.post('/reset-password', async (c) => {
-  const body = await c.req.parseBody();
-  const token = (body.token as string) || '';
-  const password = (body.password as string) || '';
+  const username =
+    ((body.username as string) || (body.identifier as string) || '').trim();
+  const totpCode = ((body.totp_code as string) || '').trim();
+  const newPassword = (body.new_password as string) || '';
   const confirmPassword = (body.confirm_password as string) || '';
 
-  if (!token) {
-    return c.redirect('/login');
-  }
-
-  if (password !== confirmPassword) {
+  if (newPassword !== confirmPassword) {
     c.status(400);
     return c.html(
-      ResetPasswordView({
+      ForgotPasswordView({
         siteName: c.env.SITE_NAME,
-        token,
         error: 'Passwords do not match',
+        username,
       })
     );
   }
 
   try {
-    await resetPasswordWithToken(c.env.DB, token, password);
+    await resetPasswordWithTotp(c.env.DB, username, totpCode, newPassword);
 
     return c.html(
-      ResetPasswordView({
+      ForgotPasswordView({
         siteName: c.env.SITE_NAME,
-        token,
-        success: 'Your password has been reset successfully.',
+        success: 'Your password has been reset successfully! All prior sessions have been revoked. You can now sign in with your new password.',
       })
     );
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to reset password';
     c.status(400);
     return c.html(
-      ResetPasswordView({
+      ForgotPasswordView({
         siteName: c.env.SITE_NAME,
-        token,
         error: errorMsg,
+        username,
       })
     );
   }
@@ -350,6 +485,7 @@ const handleLogout = async (c: any) => {
     await revokeSession(c.env.DB, sessionId);
   }
   deleteCookie(c, SESSION_COOKIE_NAME, { path: '/' });
+  deleteCookie(c, TWO_FACTOR_COOKIE_NAME, { path: '/' });
   return c.redirect('/login');
 };
 

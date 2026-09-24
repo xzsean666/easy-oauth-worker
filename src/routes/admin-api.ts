@@ -39,7 +39,6 @@ adminApiRoutes.patch('/api/admin/users/:id', async (c) => {
   const id = c.req.param('id');
   const body = (await c.req.json()) as {
     is_active?: number;
-    email_verified?: number;
     is_admin?: number;
   };
 
@@ -92,7 +91,7 @@ adminApiRoutes.post('/api/admin/clients', async (c) => {
 
   try {
     const result = await createClient(c.env.DB, {
-      name: body.name,
+      clientName: body.name,
       redirectUris: body.redirect_uris,
       allowedScopes: body.allowed_scopes,
       isPublic: body.is_public,

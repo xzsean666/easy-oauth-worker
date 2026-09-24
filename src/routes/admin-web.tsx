@@ -85,7 +85,7 @@ adminWebRoutes.get('/admin', async (c) => {
   return c.html(
     DashboardView({
       stats,
-      adminEmail: admin?.email,
+      adminUsername: admin?.username,
       siteName: c.env.SITE_NAME,
     })
   );
@@ -105,7 +105,7 @@ adminWebRoutes.get('/admin/users', async (c) => {
       users: result.users,
       total: result.total,
       search,
-      adminEmail: admin?.email,
+      adminUsername: admin?.username,
       siteName: c.env.SITE_NAME,
       message,
       csrfToken,
@@ -135,10 +135,12 @@ adminWebRoutes.post('/admin/users/:id/action', async (c) => {
         const nextActive = userRow.is_active === 1 ? 0 : 1;
         await updateUserStatus(c.env.DB, id, { is_active: nextActive }, currentAdmin?.id);
       }
-    } else if (action === 'verify_email') {
-      await updateUserStatus(c.env.DB, id, { email_verified: 1 }, currentAdmin?.id);
     } else if (action === 'revoke_sessions') {
       await revokeAllUserSessions(c.env.DB, id);
+    } else if (action === 'reset_totp') {
+      await c.env.DB.prepare('UPDATE users SET totp_secret = NULL, totp_enabled = 0, updated_at = ? WHERE id = ?')
+        .bind(Math.floor(Date.now() / 1000), id)
+        .run();
     }
     return c.redirect('/admin/users?message=User+action+completed');
   } catch (err: unknown) {
@@ -174,7 +176,7 @@ adminWebRoutes.get('/admin/clients', async (c) => {
   return c.html(
     ClientsView({
       clients,
-      adminEmail: admin?.email,
+      adminUsername: admin?.username,
       siteName: c.env.SITE_NAME,
       newSecretInfo: finalSecretInfo,
       message,
@@ -210,7 +212,7 @@ adminWebRoutes.post('/admin/clients', async (c) => {
 
   try {
     const result = await createClient(c.env.DB, {
-      name,
+      clientName: name,
       redirectUris,
       allowedScopes,
       isPublic,
@@ -220,7 +222,7 @@ adminWebRoutes.post('/admin/clients', async (c) => {
     setCookie(
       c,
       'admin_flash_secret',
-      JSON.stringify({ clientId: result.client.client_id, secret: result.plainSecret }),
+      JSON.stringify({ clientId: result.client.client_id, secret: result.secret }),
       {
         httpOnly: true,
         secure: c.req.url.startsWith('https://'),
@@ -296,12 +298,9 @@ adminWebRoutes.get('/admin/settings', (c) => {
 
   return c.html(
     SettingsView({
-      adminEmail: admin?.email,
+      adminUsername: admin?.username,
       siteName: c.env.SITE_NAME,
       authUrl: c.env.AUTH_URL,
-      smtpHost: c.env.SMTP_HOST,
-      smtpPort: c.env.SMTP_PORT,
-      smtpUsername: c.env.SMTP_USERNAME,
     })
   );
 });

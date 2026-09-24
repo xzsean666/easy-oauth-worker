@@ -32,9 +32,8 @@ export const adminAuthMiddleware: MiddlewareHandler<AppContext> = async (c, next
 
   c.set('user', {
     id: sessionData.user.id,
-    email: sessionData.user.email,
+    username: sessionData.user.username,
     is_admin: sessionData.user.is_admin,
-    email_verified: sessionData.user.email_verified,
   });
 
   c.set('session', {

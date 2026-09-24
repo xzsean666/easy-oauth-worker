@@ -29,14 +29,14 @@ describe('Database Schema and D1 Client Tests', () => {
     const now = Date.now();
     const insertRes = await execute(
       db,
-      `INSERT INTO users (id, email, password_hash, password_salt, email_verified, is_active, is_admin, created_at, updated_at)
+      `INSERT INTO users (id, username, password_hash, password_salt, is_active, is_admin, totp_enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'u_1',
-      'user@example.com',
+      'user_alpha',
       'hash123',
       'salt123',
-      0,
       1,
+      0,
       0,
       now,
       now
@@ -45,30 +45,30 @@ describe('Database Schema and D1 Client Tests', () => {
 
     const user = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', 'u_1');
     expect(user).toBeDefined();
-    expect(user?.email).toBe('user@example.com');
+    expect(user?.username).toBe('user_alpha');
     expect(user?.is_active).toBe(1);
 
-    await execute(db, 'UPDATE users SET email_verified = 1 WHERE id = ?', 'u_1');
-    const updated = await queryFirst<User>(db, 'SELECT email_verified FROM users WHERE id = ?', 'u_1');
-    expect(updated?.email_verified).toBe(1);
+    await execute(db, 'UPDATE users SET totp_enabled = 1 WHERE id = ?', 'u_1');
+    const updated = await queryFirst<User>(db, 'SELECT totp_enabled FROM users WHERE id = ?', 'u_1');
+    expect(updated?.totp_enabled).toBe(1);
 
     await execute(db, 'DELETE FROM users WHERE id = ?', 'u_1');
     const deleted = await queryFirst<User>(db, 'SELECT * FROM users WHERE id = ?', 'u_1');
     expect(deleted).toBeNull();
   });
 
-  it('enforces unique email constraint on users', async () => {
+  it('enforces unique username constraint on users', async () => {
     const now = Date.now();
     await execute(
       db,
-      `INSERT INTO users (id, email, password_hash, password_salt, email_verified, is_active, is_admin, created_at, updated_at)
+      `INSERT INTO users (id, username, password_hash, password_salt, is_active, is_admin, totp_enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'u_1',
-      'test@example.com',
+      'test_unique_user',
       'hash1',
       'salt1',
       1,
-      1,
+      0,
       0,
       now,
       now
@@ -77,14 +77,14 @@ describe('Database Schema and D1 Client Tests', () => {
     await expect(
       execute(
         db,
-        `INSERT INTO users (id, email, password_hash, password_salt, email_verified, is_active, is_admin, created_at, updated_at)
+        `INSERT INTO users (id, username, password_hash, password_salt, is_active, is_admin, totp_enabled, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         'u_2',
-        'test@example.com',
+        'test_unique_user',
         'hash2',
         'salt2',
         1,
-        1,
+        0,
         0,
         now,
         now
@@ -110,14 +110,14 @@ describe('Database Schema and D1 Client Tests', () => {
     // Insert user first
     await execute(
       db,
-      `INSERT INTO users (id, email, password_hash, password_salt, email_verified, is_active, is_admin, created_at, updated_at)
+      `INSERT INTO users (id, username, password_hash, password_salt, is_active, is_admin, totp_enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       'u_cascade',
-      'cascade@example.com',
+      'cascade_user',
       'hash',
       'salt',
       1,
-      1,
+      0,
       0,
       now,
       now

@@ -12,7 +12,7 @@ describe('Admin Web UI Integration Tests', () => {
   let db: MockD1Database;
   let mockEnv: Bindings;
   let adminId: string;
-  let adminEmail: string;
+  let adminUsername: string;
   let adminSessionId: string;
   let regularUserId: string;
   let regularSessionId: string;
@@ -23,21 +23,18 @@ describe('Admin Web UI Integration Tests', () => {
       DB: db,
       AUTH_URL: 'http://localhost:8787',
       SITE_NAME: 'EasyOAuth Admin Test',
-      SMTP_HOST: 'smtp.gmail.com',
-      SMTP_PORT: '465',
-      SMTP_USERNAME: 'sender@gmail.com',
     };
 
     // 1. Admin user
-    adminEmail = 'superadmin@example.com';
-    const { user: aUser } = await registerUser(db, adminEmail, 'SuperAdmin123!');
+    adminUsername = 'superadmin';
+    const { user: aUser } = await registerUser(db, adminUsername, 'SuperAdmin123!');
     adminId = aUser.id;
-    await execute(db, 'UPDATE users SET is_admin = 1, email_verified = 1 WHERE id = ?', adminId);
+    await execute(db, 'UPDATE users SET is_admin = 1 WHERE id = ?', adminId);
     const aSess = await createSession(db, adminId);
     adminSessionId = aSess.id;
 
     // 2. Regular user
-    const { user: rUser } = await registerUser(db, 'normaluser@example.com', 'NormalUser123!');
+    const { user: rUser } = await registerUser(db, 'normaluser', 'NormalUser123!');
     regularUserId = rUser.id;
     const rSess = await createSession(db, regularUserId);
     regularSessionId = rSess.id;
@@ -79,7 +76,7 @@ describe('Admin Web UI Integration Tests', () => {
       expect(html).toContain('Dashboard');
       expect(html).toContain('Total Users');
       expect(html).toContain('Active Sessions');
-      expect(html).toContain(adminEmail);
+      expect(html).toContain(adminUsername);
     });
   });
 
@@ -95,7 +92,7 @@ describe('Admin Web UI Integration Tests', () => {
       );
       expect(getRes.status).toBe(200);
       const html = await getRes.text();
-      expect(html).toContain('normaluser@example.com');
+      expect(html).toContain('normaluser');
 
       // POST /admin/users/:id/action (toggle_active)
       const csrfToken = await generateCsrfToken(adminSessionId);
@@ -120,7 +117,8 @@ describe('Admin Web UI Integration Tests', () => {
       expect(updatedUser?.is_active).toBe(0);
     });
 
-    it('manually verifies email via form POST', async () => {
+    it('resets user TOTP via form POST', async () => {
+      await execute(db, 'UPDATE users SET totp_enabled = 1, totp_secret = ? WHERE id = ?', 'MYSUPERSECRET', regularUserId);
       const csrfToken = await generateCsrfToken(adminSessionId);
       const postRes = await app.request(
         `/admin/users/${regularUserId}/action`,
@@ -130,14 +128,15 @@ describe('Admin Web UI Integration Tests', () => {
             'Content-Type': 'application/x-www-form-urlencoded',
             Cookie: `easy_session=${adminSessionId}`,
           },
-          body: `action=verify_email&_csrf=${csrfToken}`,
+          body: `action=reset_totp&_csrf=${csrfToken}`,
         },
         mockEnv
       );
 
       expect(postRes.status).toBe(302);
-      const updatedUser = await queryFirst<User>(db, 'SELECT email_verified FROM users WHERE id = ?', regularUserId);
-      expect(updatedUser?.email_verified).toBe(1);
+      const updatedUser = await queryFirst<User>(db, 'SELECT totp_enabled, totp_secret FROM users WHERE id = ?', regularUserId);
+      expect(updatedUser?.totp_enabled).toBe(0);
+      expect(updatedUser?.totp_secret).toBeNull();
     });
   });
 
@@ -148,7 +147,7 @@ describe('Admin Web UI Integration Tests', () => {
       const formData = new URLSearchParams({
         name: 'Dashboard Registered Client',
         redirect_uris: 'https://client.example.com/cb\nhttps://client.example.com/alt',
-        allowed_scopes: 'openid email profile',
+        allowed_scopes: 'openid profile',
         _csrf: csrfToken,
       });
 
@@ -230,7 +229,7 @@ describe('Admin Web UI Integration Tests', () => {
   });
 
   describe('Settings UI', () => {
-    it('renders provider settings and SMTP details', async () => {
+    it('renders provider settings and TOTP security details', async () => {
       const res = await app.request(
         '/admin/settings',
         {
@@ -243,8 +242,8 @@ describe('Admin Web UI Integration Tests', () => {
       const html = await res.text();
       expect(html).toContain('System Settings');
       expect(html).toContain('Identity &amp; OIDC Endpoints');
-      expect(html).toContain('Gmail SMTP Gateway');
-      expect(html).toContain('smtp.gmail.com');
+      expect(html).toContain('Authentication &amp; Recovery Architecture');
+      expect(html).toContain('Pure Username &amp; Zero-Cost TOTP');
       expect(html).toContain('PBKDF2-SHA256');
     });
   });

@@ -1,22 +1,23 @@
 -- Migration: 0001_initial_schema.sql
--- Description: Create initial tables for easy-oauth-worker (users, sessions, oauth_clients, oauth_authorization_codes, oauth_tokens, verification_tokens)
+-- Description: Clean, consolidated initial schema for easy-oauth-worker without email fields
 
 PRAGMA foreign_keys = ON;
 
--- 1. Users table
+-- 1. Users table (pure username authentication + TOTP 2FA)
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
+    username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
-    email_verified INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
     is_admin INTEGER NOT NULL DEFAULT 0,
+    totp_secret TEXT,
+    totp_enabled INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- 2. Sessions table
 CREATE TABLE IF NOT EXISTS sessions (
@@ -79,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_oauth_tokens_refresh ON oauth_tokens(refresh_toke
 CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user ON oauth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client ON oauth_tokens(client_id);
 
--- 6. Verification Tokens table (for email verification & password reset)
+-- 6. Verification Tokens table (for 2FA login ticket etc.)
 CREATE TABLE IF NOT EXISTS verification_tokens (
     token TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

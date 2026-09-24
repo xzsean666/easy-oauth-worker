@@ -16,7 +16,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
   const clientSecret = 'secret_test_xyz123';
   const redirectUri = 'https://consumer.example.com/oauth/callback';
   let userId: string;
-  let userEmail: string;
+  let userName: string;
   let sessionId: string;
 
   beforeEach(async () => {
@@ -38,19 +38,16 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
       clientSecret,
       'My Consumer Application',
       JSON.stringify([redirectUri]),
-      JSON.stringify(['openid', 'email', 'profile']),
+      JSON.stringify(['openid', 'profile']),
       0,
       now,
       now
     );
 
     // Seed user & active session
-    userEmail = 'oidc_user@example.com';
-    const { user } = await registerUser(db, userEmail, 'StrongPassword123!');
+    userName = 'oidc_user';
+    const { user } = await registerUser(db, userName, 'StrongPassword123!');
     userId = user.id;
-
-    // Verify user email
-    await execute(db, 'UPDATE users SET email_verified = 1 WHERE id = ?', userId);
 
     const session = await createSession(db, userId);
     sessionId = session.id;
@@ -90,7 +87,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
         response_type: 'code',
         client_id: clientId,
         redirect_uri: redirectUri,
-        scope: 'openid email',
+        scope: 'openid profile',
         code_challenge: challenge,
         code_challenge_method: 'S256',
         state: 'xyz_state_123',
@@ -109,7 +106,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
         response_type: 'code',
         client_id: clientId,
         redirect_uri: redirectUri,
-        scope: 'openid email',
+        scope: 'openid profile',
         code_challenge: challenge,
         code_challenge_method: 'S256',
         state: 'xyz_state_123',
@@ -126,9 +123,9 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
       expect(res.status).toBe(200);
       const html = await res.text();
       expect(html).toContain('My Consumer Application');
-      expect(html).toContain(userEmail);
+      expect(html).toContain(userName);
       expect(html).toContain('OpenID Connect');
-      expect(html).toContain('Email Address');
+      expect(html).toContain('Profile Info');
     });
 
     it('returns 400 when client_id or redirect_uri is invalid', async () => {
@@ -153,7 +150,7 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
         decision: 'allow',
         client_id: clientId,
         redirect_uri: redirectUri,
-        scope: 'openid email profile',
+        scope: 'openid profile',
         code_challenge: challenge,
         code_challenge_method: 'S256',
         state: 'state_random_789',
@@ -239,13 +236,13 @@ describe('OAuth 2.0 and OIDC Routes End-to-End Tests', () => {
       expect(userinfoRes.status).toBe(200);
       const userInfo = (await userinfoRes.json()) as {
         sub: string;
-        email: string;
-        email_verified: boolean;
+        preferred_username: string;
+        updated_at?: number;
       };
 
       expect(userInfo.sub).toBe(userId);
-      expect(userInfo.email).toBe(userEmail);
-      expect(userInfo.email_verified).toBe(true);
+      expect(userInfo.preferred_username).toBe(userName);
+      expect((userInfo as any).email).toBeUndefined();
 
       // Step 4: POST /oauth/revoke to revoke access token
       const revokeBody = new URLSearchParams({

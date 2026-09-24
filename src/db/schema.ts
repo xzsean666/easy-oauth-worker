@@ -1,11 +1,12 @@
 export interface User {
   id: string;
-  email: string;
+  username: string;
   password_hash: string;
   password_salt: string;
-  email_verified: number; // 0 or 1
   is_active: number;      // 0 or 1
   is_admin: number;       // 0 or 1
+  totp_secret?: string | null;
+  totp_enabled: number;   // 0 or 1
   created_at: number;
   updated_at: number;
 }
@@ -55,12 +56,12 @@ export interface OAuthToken {
   created_at: number;
 }
 
-export type VerificationTokenType = 'verify_email' | 'reset_password';
+export type VerificationTokenType = 'login_2fa' | string;
 
 export interface VerificationToken {
   token: string;
   user_id: string;
-  type: VerificationTokenType | string;
+  type: VerificationTokenType;
   expires_at: number;
   used: number; // 0 or 1
   created_at: number;

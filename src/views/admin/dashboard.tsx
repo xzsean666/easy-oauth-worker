@@ -3,20 +3,20 @@ import type { DashboardStats } from '../../services/admin.service';
 
 interface DashboardViewProps {
   stats: DashboardStats;
-  adminEmail?: string;
+  adminUsername?: string;
   siteName?: string;
 }
 
-export const DashboardView = ({ stats, adminEmail, siteName }: DashboardViewProps) => {
+export const DashboardView = ({ stats, adminUsername, siteName }: DashboardViewProps) => {
   const statCards = [
     { label: 'Total Users', value: stats.totalUsers, icon: '👥', color: 'indigo' },
-    { label: 'Verified Users', value: stats.verifiedUsers, icon: '✅', color: 'emerald' },
+    { label: '2FA Users', value: stats.totpUsers, icon: '🛡️', color: 'emerald' },
     { label: 'Active Sessions', value: stats.activeSessions, icon: '⚡', color: 'amber' },
     { label: 'OAuth Clients', value: stats.totalClients, icon: '📱', color: 'purple' },
   ];
 
   return (
-    <AdminLayout title="Dashboard" currentPath="/admin" adminEmail={adminEmail} siteName={siteName}>
+    <AdminLayout title="Dashboard" currentPath="/admin" adminUsername={adminUsername} siteName={siteName}>
       {/* Overview Stat Cards */}
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card) => (
@@ -61,7 +61,7 @@ export const DashboardView = ({ stats, adminEmail, siteName }: DashboardViewProp
           <div class="text-2xl mb-3">⚙️</div>
           <h3 class="text-base font-semibold text-white group-hover:text-indigo-400">System Settings</h3>
           <p class="text-xs text-slate-400 mt-1">
-            Inspect OIDC discovery metadata, SMTP status, and public provider configurations.
+            Inspect OIDC discovery metadata, security architecture, and public provider configurations.
           </p>
         </a>
       </div>

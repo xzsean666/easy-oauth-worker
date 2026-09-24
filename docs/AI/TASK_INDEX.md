@@ -25,3 +25,10 @@
 | [TASK-021](tasks/TASK-021.md) | Cloudflare Pages 部署脚本极速模式与容错体验优化 | DONE | TASK-018, TASK-019 | 秒级极速部署(--fast)、D1迁移智能容错隔离、Wrangler配置优化与部署体验提升 |
 | [TASK-022](tasks/TASK-022.md) | Cloudflare Pages D1 持久化绑定全自动打通与凭证引导 | DONE | TASK-021 | 动态Pages配置自动绑定D1、D1自动创建/迁移/回填、权限精准诊断与--db-id支持 |
 | [TASK-023](tasks/TASK-023.md) | 默认启用极速部署模式与按需深度校验支持 | DONE | TASK-022 | 部署脚本默认Fast模式、按需--test/--migrate/--full、秒级发布体验与文档更新 |
+| [TASK-024](tasks/TASK-024.md) | 无邮箱架构重构与基于 Google Authenticator (TOTP) 的二步验证及密码找回 | DONE | TASK-003, TASK-004, TASK-005, TASK-010, TASK-011, TASK-023 | 纯用户名免邮箱注册登录、原生WebCrypto TOTP算法、用户自主开启关闭2FA、找回密码明确说明与基于TOTP重置 |
+| [TASK-025](tasks/TASK-025.md) | 彻底移除邮箱相关字段与重置合并纯净数据库迁移 | DONE | TASK-024 | 清理合并单一migrations文件、彻底移除users表email与email_verified字段、全链路全面转为纯用户名架构 |
+| [TASK-026](tasks/TASK-026.md) | 部署脚本针对新数据库架构与纯用户名模型的深度适配与重置优化 | DONE | TASK-025 | 增加--reset-db选项、旧Schema智能检测告警、清理残留SMTP变量与密钥同步 |
+| [TASK-027](tasks/TASK-027.md) | 内置纯 TypeScript SVG 二维码生成引擎与 TOTP 安全中心扫码绑定落地 | DONE | TASK-024, TASK-025 | 纯Workers边缘环境离线SVG二维码渲染、安全中心高对比度扫码卡片与全链路测试 |
+| [TASK-028](tasks/TASK-028.md) | 端到端可视化回归测试与全套高清界面截图更新 (含 TOTP 二维码扫码卡片) | DONE | TASK-020, TASK-027 | 基于Chromium CDP刷新全套12张2x Retina高清截图并完成资产与回归验证 |
+
+

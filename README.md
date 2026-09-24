@@ -22,10 +22,12 @@
   - UserInfo endpoint (`/oauth/userinfo`) with Bearer token authentication.
 
 - **Modern User Authentication & UI**:
-  - User self-registration and secure login.
+  - Pure username user model (No email, no SMS, zero third-party dependencies or fees).
   - PBKDF2-SHA256 password hashing (100,000 iterations) via native `Web Crypto API` (`crypto.subtle`).
   - HttpOnly, Secure, SameSite session cookies (`easy_session`).
-  - Email verification and forgot/reset password workflows.
+  - Google Authenticator (RFC 6238 TOTP) Two-Factor Authentication (2FA).
+  - Self-service password recovery via Google Authenticator OTP code.
+  - Personal Security Center (`/account/security`) with dynamic SVG QR code generation and secret display.
   - Clean, responsive server-rendered UI built with **Hono JSX** and Tailwind CSS CDN.
 
 - **Admin Console & Management API**:
@@ -34,15 +36,15 @@
   - User operations: activate/deactivate, toggle admin status, trigger password resets, delete accounts.
   - Client operations: register confidential or public clients, configure redirect URI whitelists and allowed scopes, delete clients.
 
-- **Direct Socket Outbound Email (Gmail SMTP)**:
-  - Zero third-party SaaS email dependency (no Resend/SendGrid API keys required).
-  - Employs Cloudflare Workers native `cloudflare:sockets` for direct TLS/SSL communication over port 465 with `smtp.gmail.com`.
-  - Beautiful, responsive HTML email templates for account activation and password resets.
+- **100% Offline & Zero-Cost Security**:
+  - RFC 6238 TOTP implemented entirely with native Web Crypto API (HMAC-SHA1).
+  - Built-in pure TypeScript QR code generation (`src/crypto/qr.ts`), eliminating external API or CDN dependencies.
+  - Zero external SMS or SMTP services required.
 
 - **Edge Native & Lightweight**:
   - Built with [Hono v4](https://hono.dev/) for high throughput and sub-millisecond cold starts.
   - Fully typed with TypeScript 5.
-  - Fully decoupled mock architecture for SQLite and socket testing.
+  - Fully decoupled mock architecture for SQLite testing.
 
 ---
 
@@ -71,16 +73,18 @@
 |                     |   - PBKDF2 / SHA-256 Passwords    |                       |
 |                     |   - RS256 JWT ID Tokens / JWKS    |                       |
 |                     |   - PKCE S256 Verification        |                       |
+|                     |   - RFC 6238 TOTP (Web Crypto)    |                       |
+|                     |   - Embedded SVG QR Engine        |                       |
 |                     +-----------------+-----------------+                       |
 |                                       |                                         |
 +---------------------------------------+-----------------------------------------+
-                    |                                       |
-                    v                                       v
-    +-------------------------------+       +-------------------------------+
-    |      Cloudflare D1 SQLite     |       |    Gmail SMTP (TCP Sockets)   |
-    |  Users, Sessions, Clients,    |       |  Port 465 Direct TLS Mailer   |
-    |  Auth Codes, Tokens           |       +-------------------------------+
-    +-------------------------------+
+                                        |
+                                        v
+                        +-------------------------------+
+                        |      Cloudflare D1 SQLite     |
+                        |  Users, Sessions, Clients,    |
+                        |  Auth Codes, Tokens           |
+                        +-------------------------------+
 ```
 
 ---
@@ -138,8 +142,6 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 AUTH_URL = "http://localhost:8787"
 SITE_NAME = "easy-oauth-worker"
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = "465"
 
 [[d1_databases]]
 binding = "DB"
@@ -174,7 +176,7 @@ Visit `http://localhost:8787` in your browser. You will be greeted with the auth
 
 ## 🧪 Testing & Verification
 
-The project includes 100% automated test coverage with 12 distinct test suites and 99 unit/integration/E2E tests, utilizing Node's built-in SQLite engine:
+The project includes 100% automated test coverage with 16 distinct test suites and 136 unit/integration/E2E tests, utilizing Node's built-in SQLite engine:
 
 ```bash
 # Run all unit, integration, and E2E tests
@@ -195,38 +197,22 @@ pnpm run test:visual
 
 ---
 
-## 🔒 Gmail SMTP Configuration (Outbound Email)
+## 🛡️ Google Authenticator (TOTP) 2FA & Password Recovery (100% Offline & Free)
 
-`easy-oauth-worker` sends verification emails and password reset links via direct TLS TCP Sockets (`cloudflare:sockets`) to `smtp.gmail.com:465`.
+`easy-oauth-worker` operates on a **Zero-Email, Zero-SMS** architecture. Security and self-service recovery are handled entirely offline via RFC 6238 Time-based One-Time Passwords (TOTP):
 
-### Generating a Google Account App Password
+### How It Works
 
-1. Log into your Google Account and navigate to [Google Account Security](https://myaccount.google.com/security).
-2. Enable **2-Step Verification** (if not already enabled).
-3. Under the "How you sign in to Google" section, search for **App passwords** (or go directly to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)).
-4. Enter an App name (e.g., `EasyOAuth Worker`) and click **Create**.
-5. Copy the generated 16-character password (e.g. `abcd efgh ijkl mnop`).
-
-### Storing Secrets in Cloudflare Workers
-
-Store your credentials securely in Cloudflare using Wrangler secrets:
-
-```bash
-# Set your Gmail address (e.g., myaccount@gmail.com)
-npx wrangler secret put SMTP_USERNAME
-
-# Set your 16-character Google App Password (without spaces)
-npx wrangler secret put SMTP_PASSWORD
-```
-
-For local development with email sending, you can also create a `.dev.vars` file in the project root:
-
-```ini
-SMTP_USERNAME="myaccount@gmail.com"
-SMTP_PASSWORD="your16charpassword"
-```
-
-> **Note**: If `SMTP_USERNAME` and `SMTP_PASSWORD` are not configured, the service will log an informative warning and permit authentication flows to proceed without crashing.
+1. **User Registration & Login**: Users register with just a unique `username` (3-32 characters) and strong password. No email address or verification link required.
+2. **Personal Security Center (`/account/security`)**:
+   - Users can choose to enable or disable Two-Factor Authentication (2FA) at any time.
+   - Upon setup, an embedded SVG QR code and a Base32 secret key are generated directly in the browser/worker via pure TypeScript without external CDN or Google Chart APIs.
+   - Users scan the QR code using Google Authenticator, Microsoft Authenticator, 1Password, or Bitwarden, and confirm with a 6-digit code.
+3. **Login Two-Factor Enforcement**:
+   - When 2FA is active, logging in requires verifying credentials followed by entering the 6-digit TOTP code (`/login-2fa`).
+4. **Self-Service Password Recovery without Email**:
+   - If a user forgets their password, they visit `/forgot-password`, provide their username and current 6-digit Google Authenticator code, and set a new password.
+   - If 2FA has not been bound, self-service recovery is not possible, and password resets must be performed by the system administrator via the `/admin` portal.
 
 ---
 
@@ -253,6 +239,9 @@ bash scripts/deploy-pages.sh --full
 
 # 或部署并灌入初始种子数据
 bash scripts/deploy-pages.sh --seed
+
+# 针对重构无邮箱新结构：一键重置远端 D1 并灌入初始种子数据
+bash scripts/deploy-pages.sh --reset-db --seed
 ```
 
 #### 2. 部署脚本参数说明
@@ -262,6 +251,7 @@ bash scripts/deploy-pages.sh --seed
 | `-f, --fast` | `true` | **极速模式**（默认行为）：跳过测试与 D1 迁移，非交互式秒级直接发布 Pages |
 | `-t, --test` | `false` | 部署前显式运行 TypeScript 检查与 Vitest 测试套件 |
 | `-m, --migrate` | `false` | 部署前显式执行远程 D1 数据库 Schema 迁移 |
+| `-r, --reset-db` | `false` | **重置远端数据库**：清除旧表并重新应用最新的纯用户名+TOTP纯净Schema |
 | `--full` | `false` | 完整自检模式（执行测试、D1 迁移、交互确认） |
 | `-p, --project-name` | `easy-oauth-worker` | Cloudflare Pages 项目名称 |
 | `-b, --branch` | `main` | 绑定的 Git 分支名称 |
@@ -322,8 +312,6 @@ npx wrangler d1 execute easy-oauth-db --remote --file=scripts/seed.sql
 ```bash
 npx wrangler secret put SESSION_SECRET
 npx wrangler secret put OIDC_SIGNING_KEY
-npx wrangler secret put SMTP_PASSWORD
-npx wrangler secret put SMTP_USERNAME
 
 pnpm run deploy
 ```
@@ -336,7 +324,7 @@ When you run `scripts/seed.sql`, the following records are provisioned:
 
 | Type | Identifier | Secret / Password | Description |
 | :--- | :--- | :--- | :--- |
-| **Admin User** | `admin@example.com` | `AdminPassword123!` | System administrator with full `/admin` access |
+| **Admin User** | `admin` | `AdminPassword123!` | System administrator with full `/admin` access |
 | **Confidential Client** | `web-app-client` | `secret_web_app_987654321` | Demo server-side web application |
 | **Public Client** | `spa-client` | *(None / Public)* | Demo single-page / mobile application |
 
@@ -366,7 +354,8 @@ Example response:
   "response_types_supported": ["code"],
   "subject_types_supported": ["public"],
   "id_token_signing_alg_values_supported": ["RS256"],
-  "scopes_supported": ["openid", "email", "profile"],
+  "scopes_supported": ["openid", "profile"],
+  "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "preferred_username"],
   "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
   "code_challenge_methods_supported": ["S256"]
 }
@@ -386,7 +375,7 @@ export default NextAuth({
       name: "Easy OAuth",
       type: "oauth",
       wellKnown: "https://auth.yourdomain.com/.well-known/openid-configuration",
-      authorization: { params: { scope: "openid email profile" } },
+      authorization: { params: { scope: "openid profile" } },
       clientId: "web-app-client",
       clientSecret: "secret_web_app_987654321",
       idToken: true,
@@ -394,8 +383,7 @@ export default NextAuth({
       profile(profile) {
         return {
           id: profile.sub,
-          name: profile.name ?? profile.email,
-          email: profile.email,
+          name: profile.preferred_username,
         };
       },
     },
@@ -414,7 +402,7 @@ export default NextAuth({
      response_type=code
      &client_id=spa-client
      &redirect_uri=https://myapp.com/callback
-     &scope=openid email profile
+     &scope=openid profile
      &state=xyz123
      &code_challenge=E9Melhoa2OwvFrGMTJguCH5rtx64Znqi60hZu35e369
      &code_challenge_method=S256
@@ -440,11 +428,11 @@ export default NextAuth({
 | `GET` | `/` | Home page / redirect to login |
 | `GET` | `/health` | Healthcheck and service status endpoint |
 | `GET/POST`| `/login` | User login page & credential verification |
-| `GET/POST`| `/register` | User registration page & account creation |
+| `GET/POST`| `/login-2fa` | Two-Factor Authentication TOTP verification page |
+| `GET/POST`| `/register` | User registration page (zero-email) |
 | `GET` | `/logout` | Session invalidation and cookie removal |
-| `GET/POST`| `/forgot-password` | Password reset request form & dispatch |
-| `GET/POST`| `/reset-password` | Password update form using reset token |
-| `GET` | `/verify-email` | Email confirmation verification link |
+| `GET/POST`| `/account/security` | Personal Security Center (View & Toggle Google Authenticator 2FA) |
+| `GET/POST`| `/forgot-password` | Offline self-service password recovery using Google Authenticator TOTP |
 
 ### OAuth 2.0 & OIDC Endpoints
 | Method | Path | Description |
@@ -454,7 +442,7 @@ export default NextAuth({
 | `GET` | `/oauth/authorize` | Authorization endpoint (PKCE & Scope validation) |
 | `POST`| `/oauth/consent` | User consent decision processing |
 | `POST`| `/oauth/token` | Token issuance (Authorization Code & Refresh Token) |
-| `GET/POST`| `/oauth/userinfo` | Authenticated user profile retrieval |
+| `GET/POST`| `/oauth/userinfo` | Authenticated user profile retrieval (`sub`, `preferred_username`) |
 | `POST`| `/oauth/revoke` | Revoke active access or refresh tokens |
 
 ### Admin Console & APIs (Admin Session Required)

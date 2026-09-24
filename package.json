@@ -12,11 +12,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:email": "node --experimental-strip-types scripts/test-email.ts",
     "test:visual": "node scripts/visual-test.js"
   },
   "dependencies": {
-    "hono": "^4.7.4"
+    "hono": "^4.7.4",
+    "uqr": "^0.1.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",
